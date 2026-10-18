@@ -36,6 +36,25 @@ type BookResponse = {
   books: { UP: Book | null; DOWN: Book | null };
 };
 
+type PaperPosition = {
+  slug: string; outcome: "UP" | "DOWN"; token_id: string; quantity: string;
+  cost_basis: string; source: string; created_at: string;
+};
+type PaperOrder = {
+  order_id: string; side: "BUY" | "SELL"; outcome: "UP" | "DOWN"; slug: string;
+  quantity: string; price: string; notional: string; fee: string;
+  cash_delta: string; realized_pnl: string | null; source: string;
+  executed_at: string;
+};
+type PaperState = {
+  mode: "PAPER_ONLY"; account: "demo" | "clob"; cash_balance: string;
+  starting_cash: string; realized_pnl: string; fee_rate_assumed: string;
+  valuation_status: string; positions: PaperPosition[]; orders: PaperOrder[];
+};
+type PaperQuote = {
+  slug: string; outcome: "UP" | "DOWN"; best_bid: string; best_ask: string;
+  bid_size: string; ask_size: string; source: string; mode: "PAPER_ONLY";
+};
 type HealthResponse = {
   status: string;
   mode: string;
@@ -80,6 +99,13 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [clock, setClock] = useState(Date.now());
   const [orderbook, setOrderbook] = useState<BookResponse | null>(null);
+  const [paperAccount, setPaperAccount] = useState<"demo" | "clob">("demo");
+  const [paper, setPaper] = useState<PaperState | null>(null);
+  const [paperQuotes, setPaperQuotes] = useState<PaperQuote[]>([]);
+  const [paperStake, setPaperStake] = useState("10");
+  const [paperBusy, setPaperBusy] = useState(false);
+  const [paperNotice, setPaperNotice] = useState("");
+  const [paperError, setPaperError] = useState("");
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -99,6 +125,22 @@ export default function App() {
         !Array.isArray(data.markets)
       ) throw new Error("API trả về trạng thái khác READ_ONLY; tạm ngừng hiển thị");
       setItems(data.markets);
+      try {
+        const paperRes = await fetch(`${API}/api/paper/state?account=${paperAccount}`, { cache: "no-store" });
+        if (paperRes.ok) {
+          const nextPaper: PaperState = await paperRes.json();
+          setPaper(nextPaper.mode === "PAPER_ONLY" ? nextPaper : null);
+        } else setPaper(null);
+        const quotes = await Promise.all((["UP", "DOWN"] as const).map(async outcome => {
+          const response = await fetch(`${API}/api/paper/quote?account=${paperAccount}&outcome=${outcome}`,
+            { cache: "no-store" });
+          return response.ok ? await response.json() as PaperQuote : null;
+        }));
+        setPaperQuotes(quotes.filter((v): v is PaperQuote => v !== null && v.mode === "PAPER_ONLY"));
+      } catch {
+        setPaper(null);
+        setPaperQuotes([]);
+      }
       const latest = data.markets
         .filter(m => m.data_source === "gamma_public")
         .sort((a,b) => Date.parse(b.fetched_at) - Date.parse(a.fetched_at))[0];
@@ -124,11 +166,41 @@ export default function App() {
     } catch (err) {
       setOrderbook(null);
       setApiOk(false);
+      setPaper(null);
+      setPaperQuotes([]);
       setError(err instanceof Error ? err.message : "Không thể kết nối API");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [paperAccount]);
+
+  const placePaper = async (side: "BUY" | "SELL", outcome: "UP" | "DOWN", slug?: string) => {
+    if (paperBusy) return;
+    setPaperBusy(true);
+    setPaperError("");
+    setPaperNotice("");
+    try {
+      const quote = paperQuotes.find(v => v.outcome === outcome);
+      const request = {
+        request_id: crypto.randomUUID(), side, outcome,
+        ...(side === "BUY" ? {spend_usd: paperStake} : {}),
+        slug: slug ?? quote?.slug,
+      };
+      const response = await fetch(`${API}/api/paper/orders?account=${paperAccount}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-OpenPoly-Paper": "1" },
+        body: JSON.stringify(request),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.reason ?? result.error ?? "Paper order failed");
+      setPaperNotice(`${side} ${outcome} đã ghi sổ (${result.source === "synthetic_demo" ? "DEMO giả lập" : "CLOB paper"}); giá ${fmtPrice(result.price)}, phí giả định ${result.fee} USD.`);
+      await refresh();
+    } catch (err) {
+      setPaperError(err instanceof Error ? err.message : "Không ghi được lệnh ảo");
+    } finally {
+      setPaperBusy(false);
+    }
+  };
 
   useEffect(() => {
     void refresh();
@@ -168,7 +240,7 @@ export default function App() {
         <div className="nav-link current"><span className="nav-icon">▦</span> Tổng quan thị trường</div>
         <div className="nav-link soon"><span className="nav-icon">◌</span> Backtesting <span className="soon-badge">SOON</span></div>
         <div className="nav-link soon"><span className="nav-icon">⌁</span> AI Strategies <span className="soon-badge">SOON</span></div>
-        <div className="nav-link soon"><span className="nav-icon">◫</span> Paper Trading <span className="soon-badge">SOON</span></div>
+        <a className="nav-link current" href="#paper-trading"><span className="nav-icon">◫</span> Paper Trading <span className="soon-badge">DEMO</span></a>
         <div className="side-footer">
           <div className="protected">◉ SECURE RESEARCH MODE</div>
           <p>Hệ thống chỉ đọc dữ liệu. Không kết nối ví và không gửi lệnh giao dịch.</p>
@@ -196,7 +268,7 @@ export default function App() {
 
         <div className="security-bar">
           <span className="security-icon">🔒</span>
-          <div><strong>READ-ONLY / LIVE TRADING DISABLED</strong><small>Chỉ để kiểm thử. Không có chức năng nạp ví, ký lệnh hoặc giao dịch thật.</small></div>
+          <div><strong>NO LIVE ORDERS / PAPER TRADING ONLY</strong><small>Lệnh mua/bán chỉ ghi PostgreSQL bằng USD ảo. Không kết nối ví hoặc gửi lệnh Polymarket.</small></div>
           <span className="security-mode">{NO_LIVE_TRADING ? "SAFE MODE" : "UNEXPECTED MODE"}</span>
         </div>
 
@@ -283,6 +355,78 @@ export default function App() {
                 <small>{item ? `Nhận lúc ${fmtTime(item.received_at)} · ${Math.max(0,Math.round(age))}s trước` : "Đang chờ snapshot book thật từ CLOB"}</small>
               </div>;
             })}
+          </div>
+        </section>
+
+        <section className="panel paper-panel" id="paper-trading">
+          <div className="panel-heading">
+            <div><div className="eyebrow">VIRTUAL CASH ONLY · LOCAL POSTGRES</div><h2>Paper Trading Simulator</h2></div>
+            <span className="tag tag-green">PAPER ONLY</span>
+          </div>
+          <div className="paper-switch" role="group" aria-label="Chế độ tài khoản ảo">
+            <button type="button" aria-pressed={paperAccount === "demo"}
+              className={paperAccount === "demo" ? "active" : ""}
+              onClick={() => {setPaperAccount("demo");setPaperNotice("");setPaperError("");}}>
+              Demo offline (giá giả lập)
+            </button>
+            <button type="button" aria-pressed={paperAccount === "clob"}
+              className={paperAccount === "clob" ? "active" : ""}
+              onClick={() => {setPaperAccount("clob");setPaperNotice("");setPaperError("");}}>
+              CLOB Paper (order book thật)
+            </button>
+          </div>
+          <p className="paper-caption">
+            {paperAccount === "demo"
+              ? "DEMO: BID 48¢ / ASK 52¢ cố định cho cả UP và DOWN; không phản ánh bất kỳ thị trường hoặc lợi nhuận thực nào."
+              : "CLOB: chỉ mô phỏng khớp lệnh từ snapshot order book thật dưới 10 giây, không khớp nếu feed chậm/thiếu."}
+            {" "}Phí 0,5% là giả định để test, không phải phí chính thức của Polymarket.
+          </p>
+          <div className="paper-metrics">
+            <div><span>TIỀN MẶT ẢO</span><strong>{paper ? Number(paper.cash_balance).toFixed(2) : "—"} USD</strong></div>
+            <div><span>ĐANG ĐẦU TƯ (GIÁ VỐN)</span><strong>{paper ? paper.positions.reduce((s,p)=>s+Number(p.cost_basis),0).toFixed(2) : "—"} USD</strong></div>
+            <div><span>P&L ĐÃ ĐÓNG</span><strong>{paper ? Number(paper.realized_pnl).toFixed(2) : "—"} USD</strong></div>
+          </div>
+          <div className="paper-trade-controls">
+            <label htmlFor="paper-stake">Ngân sách mỗi lệnh (USD ảo)</label>
+            <input id="paper-stake" aria-label="Ngân sách mỗi lệnh (USD ảo)" inputMode="decimal"
+              value={paperStake} onChange={e=>setPaperStake(e.target.value)}
+              placeholder="10" type="number" min="1" max="50" step="1"/>
+            <span>Giới hạn 1–50 USD/lệnh; tổng vốn mở tối đa 250 USD.</span>
+          </div>
+          <div className="paper-trade-buttons">
+            {(["UP", "DOWN"] as const).map(outcome => {
+              const quote = paperQuotes.find(q => q.outcome === outcome);
+              return <button key={outcome} type="button" disabled={paperBusy || !paper || !quote}
+                className={outcome === "UP" ? "paper-buy-up" : "paper-buy-down"}
+                onClick={()=>void placePaper("BUY",outcome)}>
+                {paperBusy ? "Đang ghi lệnh..." : `BUY ${outcome} · ${quote ? fmtPrice(quote.best_ask) : "Không có quote"}`}
+              </button>;
+            })}
+          </div>
+          {paperNotice && <div className="paper-notice" role="status">{paperNotice}</div>}
+          {paperError && <div className="paper-error" role="alert">{paperError}</div>}
+          <div className="paper-holdings">
+            <h3>Vị thế ảo đang giữ <span className="count-badge">{paper?.positions.length ?? 0}</span></h3>
+            {paper && paper.positions.length === 0 && <p className="paper-empty">Chưa có vị thế. Bạn có thể thử mua bằng tiền ảo ở trên.</p>}
+            {paper?.positions.map(position => <div className="paper-position" key={position.slug + position.outcome}>
+              <div><strong>{position.outcome} · {position.quantity} shares</strong>
+                <small>{position.slug} · Giá vốn {Number(position.cost_basis).toFixed(2)} USD</small></div>
+              <button disabled={paperBusy || (paperAccount === "clob" && !paperQuotes.some(q => q.slug === position.slug && q.outcome === position.outcome))}
+                type="button" onClick={() => void placePaper("SELL", position.outcome, position.slug)}>SELL ALL (ảo)</button>
+            </div>)}
+            <h3>Lịch sử lệnh ảo</h3>
+            <div className="paper-history">
+              {paper?.orders.slice(0,10).map(order => <div className="paper-history-row" key={order.order_id}>
+                <span><strong>{order.side} {order.outcome}</strong> · {Number(order.quantity).toFixed(3)} shares
+                  <small>{fmtTime(order.executed_at)} · {order.source === "synthetic_demo" ? "DEMO" : "CLOB"}</small></span>
+                <span className={order.cash_delta.startsWith("-") ? "red" : "green"}>
+                  {Number(order.cash_delta).toFixed(2)} USD
+                  {order.realized_pnl !== null && <small>P&L {Number(order.realized_pnl).toFixed(2)} USD</small>}
+                </span>
+              </div>)}
+              {(!paper || paper.orders.length === 0) && <p className="paper-empty">Chưa có lệnh ảo nào.</p>}
+            </div>
+            <p className="paper-disclaimer">Không định giá P&L chưa đóng, không tự thanh toán kết quả UP/DOWN khi đáo hạn; cần oracle xác minh riêng. Chức năng này không thể gửi lệnh thật.</p>
           </div>
         </section>
 

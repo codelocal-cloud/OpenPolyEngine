@@ -152,4 +152,37 @@ footer span{padding:0 6px}
 .book-card small{color:#8195b0;font-size:11px}
 @media(max-width:600px){.book-cards{grid-template-columns:1fr}}
 
+.paper-panel{padding:24px;margin-bottom:20px}
+.paper-switch{display:flex;gap:4px;background:#1a283e;border:1px solid #2c3b53;border-radius:9px;padding:5px;margin-top:22px;width:fit-content;max-width:100%;flex-wrap:wrap}
+.paper-switch button{background:transparent;border:0;border-radius:6px;color:#8e9eb7;font:600 12px "DM Sans",sans-serif;padding:10px 15px;cursor:pointer}
+.paper-switch button.active{color:#e3e6ff;background:#3a426b}
+.paper-caption{font-size:12px;line-height:1.7;color:#b0a6a1;margin:16px 0 18px;max-width:880px}
+.paper-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:13px}
+.paper-metrics>div{padding:17px;border:1px solid #31415a;border-radius:10px;background:#18263b}
+.paper-metrics span,.paper-metrics strong{display:block}
+.paper-metrics span{color:#8296b2;font:10px "JetBrains Mono",monospace}
+.paper-metrics strong{margin-top:9px;font-size:24px;letter-spacing:-.6px}
+.paper-trade-controls{display:flex;align-items:center;gap:11px;margin-top:22px;flex-wrap:wrap}
+.paper-trade-controls label{color:#c5d6ea;font-size:12px;font-weight:700}
+.paper-trade-controls input{width:116px;border:1px solid #49617f;background:#101827;color:#eff5ff;font-size:15px;font-weight:700;border-radius:8px;padding:11px}
+.paper-trade-controls span{color:#778ba9;font-size:11px}
+.paper-trade-buttons{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin:17px 0}
+.paper-trade-buttons button{border-radius:9px;padding:15px;border:1px solid;font-size:13px;font-weight:800;cursor:pointer}
+.paper-buy-up{color:#65e5b1;background:#174136;border-color:#317d64!important}
+.paper-buy-down{color:#ffa0ae;background:#512634;border-color:#a44b60!important}
+.paper-trade-buttons button:disabled{opacity:.42;cursor:not-allowed}
+.paper-notice,.paper-error{padding:12px 14px;border-radius:8px;font-size:12px;margin-bottom:12px}
+.paper-notice{border:1px solid #286a54;background:#15352e;color:#84e6bd}
+.paper-error{border:1px solid #94495b;background:#391e29;color:#f0aabc}
+.paper-holdings{border-top:1px solid #2d3b50;margin-top:22px;padding-top:16px}
+.paper-holdings h3{font-size:14px;color:#dee8f8;margin:11px 0 14px}
+.paper-empty{color:#7d92ab;font-size:12px;margin:15px 0}
+.paper-position,.paper-history-row{display:flex;align-items:center;justify-content:space-between;gap:15px;padding:13px 8px;border-top:1px solid #263449}
+.paper-position strong,.paper-history-row strong{font-size:12px}
+.paper-position small,.paper-history-row small{display:block;color:#7186a3;font-size:10px;margin-top:3px;overflow-wrap:anywhere}
+.paper-position button{border:1px solid #53607a;color:#e1e8f7;background:#24304a;border-radius:7px;font-size:11px;font-weight:700;padding:10px 11px;white-space:nowrap;cursor:pointer}
+.paper-position button:disabled{opacity:.4;cursor:not-allowed}
+.paper-history-row>span:last-child{text-align:right;white-space:nowrap;font-size:12px;font-weight:700}
+.paper-disclaimer{margin:20px 0 0;font-size:11px;color:#b6a585;line-height:1.7;border-top:1px solid #263449;padding-top:15px}
+@media(max-width:650px){.paper-metrics{grid-template-columns:1fr}.paper-trade-buttons{grid-template-columns:1fr}.paper-switch{width:100%}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{transition:none!important;animation:none!important}}
