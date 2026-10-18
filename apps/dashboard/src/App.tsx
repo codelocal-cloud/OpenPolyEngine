@@ -293,30 +293,30 @@ export default function App() {
     <div className="shell">
       <aside className="sidebar">
         <div className="brand">
-          <div className="brand-emblem">◈</div>
+          <div className="brand-emblem" aria-hidden="true">◈</div>
           <div className="brand-names">
             <strong>OpenPoly<span>Engine</span></strong>
             <small>TRADING RESEARCH OS</small>
           </div>
         </div>
         <div className="side-heading">WORKSPACE</div>
-        <div className="nav-link current"><span className="nav-icon">▦</span> Tổng quan thị trường</div>
+        <a className="nav-link current" href="#overview"><span className="nav-icon" aria-hidden="true">▦</span> Tổng quan thị trường</a>
         <div className="nav-link soon"><span className="nav-icon">◌</span> Backtesting <span className="soon-badge">SOON</span></div>
         <div className="nav-link soon"><span className="nav-icon">⌁</span> AI Strategies <span className="soon-badge">SOON</span></div>
-        <a className="nav-link current" href="#paper-trading"><span className="nav-icon">◫</span> Paper Trading <span className="soon-badge">DEMO</span></a>
+        <a className="nav-link" href="#paper-trading"><span className="nav-icon" aria-hidden="true">◫</span> Paper Trading <span className="soon-badge">DEMO</span></a>
         <div className="side-footer">
           <div className="protected">◉ SECURE RESEARCH MODE</div>
           <p>Hệ thống chỉ đọc dữ liệu. Không kết nối ví và không gửi lệnh giao dịch.</p>
-          <div className="sidebar-version">VERSION 0.2.0 • LOCALHOST</div>
+          <div className="sidebar-version">VERSION 0.3.0 • LOCALHOST</div>
         </div>
       </aside>
 
-      <main className="main">
+      <main className="main" id="overview">
         <header className="topbar">
           <div>
             <div className="breadcrumb">DASHBOARD <span>/</span> POLYMARKET <span>/</span> BTC 5M</div>
-            <h1>Market Overview <span className="title-dot">.</span></h1>
-            <p>Theo dõi thị trường BTC Up / Down khung 5 phút</p>
+            <h1>BTC Market <span className="title-dot">Overview</span></h1>
+            <p>Không gian nghiên cứu và giao dịch giả lập · Polymarket BTC 5 phút</p>
           </div>
           <div className="header-right">
             <div className="connection">
@@ -330,7 +330,7 @@ export default function App() {
         </header>
 
         <div className="security-bar">
-          <span className="security-icon">🔒</span>
+          <span className="security-icon" aria-hidden="true">◆</span>
           <div><strong>NO LIVE ORDERS / PAPER TRADING ONLY</strong><small>Lệnh mua/bán chỉ ghi PostgreSQL bằng USD ảo. Không kết nối ví hoặc gửi lệnh Polymarket.</small></div>
           <span className="security-mode">{NO_LIVE_TRADING ? "SAFE MODE" : "UNEXPECTED MODE"}</span>
         </div>
@@ -346,8 +346,8 @@ export default function App() {
         <div className="summary-cards">
           <div className="metric-card highlight">
             <div className="metric-top"><span>THỊ TRƯỜNG</span><span className="tag tag-indigo">BTC / 5 MIN</span></div>
-            <div className="metric-value">UP / DOWN</div>
-            <div className="metric-bottom">Polymarket Prediction Market</div>
+            <div className="metric-value">BTC <span className="metric-arrow">↗</span> 5m</div>
+            <div className="metric-bottom">Up / Down · Prediction Market</div>
           </div>
           <div className="metric-card">
             <div className="metric-top"><span>SNAPSHOT GAMMA</span><span className="mono">◉</span></div>
@@ -360,7 +360,7 @@ export default function App() {
             <div className="metric-bottom">Fixture dùng cho kiểm thử</div>
           </div>
           <div className="metric-card">
-            <div className="metric-top"><span>ĐỘ MỚI FEED</span><span className={feedFresh ? "tag tag-green" : "tag tag-amber"}>{feedFresh ? "FRESH" : "STALE"}</span></div>
+            <div className="metric-top"><span>ĐỘ MỚI DỮ LIỆU</span><span className={feedFresh ? "tag tag-green" : "tag tag-amber"}>{feedFresh ? "FRESH" : "STALE"}</span></div>
             <div className="metric-value">{ageSeconds === null ? "—" : `${ageSeconds}s`}</div>
             <div className="metric-bottom">Kể từ snapshot Gamma gần nhất</div>
           </div>
@@ -529,7 +529,7 @@ export default function App() {
           </table></div>
           <div className="table-footnote">* Các mức giá lấy từ Gamma event metadata. Không phải best bid / best ask và không phản ánh xác suất thắng đã được kiểm định.</div>
         </section>
-        <footer>OpenPolyEngine v0.2.0 <span>•</span> Local research environment <span>•</span> Not financial advice <span>•</span> No live order execution</footer>
+        <footer>OpenPolyEngine v0.3.0 <span>•</span> Local research environment <span>•</span> Not financial advice <span>•</span> No live order execution</footer>
       </main>
     </div>
   );
