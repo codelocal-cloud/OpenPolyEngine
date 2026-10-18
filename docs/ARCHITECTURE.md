@@ -12,5 +12,7 @@ Gamma public GET -> strict UTC 5m market parser -> Python scanner
 - Tokens are strings to preserve their full decimal precision.
 - Decimal values remain Decimal/NUMERIC, never binary float in persistence.
 - Migrations run explicitly and are version tracked in `schema_migrations`.
+- Public CLOB WebSocket subscriber collects book snapshots and timestamped delta events for current verified tokens, writes to `market_observations`, and optionally caches full-book BBO in Redis.
+- Reconnect and 5-minute rollover reset socket state. Stored deltas are **not yet** reconstructable into a sequence-verified executable order book.
 - Production secrets must come from a secret manager, not checked-in files.
 - Backtest, risk, trading execution and dashboard are subsequent components.

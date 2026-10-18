@@ -10,6 +10,9 @@ from urllib.parse import parse_qs, urlsplit
 
 import psycopg
 from services.market_data.storage import PostgresStore
+from services.market_data.observation_storage import ObservationStore
+from services.market_data.models import SLUG_RE
+from datetime import datetime, timezone
 
 LOCAL_UI_ORIGINS = {"http://localhost:5173", "http://127.0.0.1:5173"}
 
@@ -19,8 +22,9 @@ def recent_snapshots(limit: int = 20, *, store: PostgresStore | None = None) -> 
 
 
 class MarketHandler(BaseHTTPRequestHandler):
-    def __init__(self, *args, store: PostgresStore, **kwargs):
+    def __init__(self, *args, store: PostgresStore, observation_store: ObservationStore, **kwargs):
         self.store = store
+        self.observation_store = observation_store
         super().__init__(*args, **kwargs)
 
     def _send(self, code: int, payload: dict) -> None:
@@ -41,6 +45,12 @@ class MarketHandler(BaseHTTPRequestHandler):
         if uri.path == "/health":
             self._send(200, {"status": "ok", "mode": "READ_ONLY", "trading_enabled": False})
             return
+        if uri.path == "/api/orderbooks":
+            self._serve_orderbooks(uri.query)
+            return
+        if uri.path == "/api/observations":
+            self._serve_observations(uri.query)
+            return
         if uri.path != "/api/markets":
             self._send(404, {"error": "not_found"})
             return
@@ -58,6 +68,54 @@ class MarketHandler(BaseHTTPRequestHandler):
             return
         self._send(200, {"mode": "READ_ONLY", "markets": result, "count": len(result)})
 
+    def _serve_orderbooks(self, query: str) -> None:
+        params = parse_qs(query)
+        slug = params.get("slug", [""])[0]
+        if not SLUG_RE.fullmatch(slug):
+            self._send(400, {"error": "invalid_slug"})
+            return
+        try:
+            market = self.store.verified_market(slug)
+            if market is None:
+                self._send(404, {"error": "verified_market_not_found"})
+                return
+            books = {}
+            now = datetime.now(timezone.utc)
+            start = datetime.fromisoformat(market["slot_start"])
+            end = datetime.fromisoformat(market["slot_end"])
+            current = start <= now < end and not market.get("closed", False)
+            for outcome, token in (("UP", market["token_up"]), ("DOWN", market["token_down"])):
+                book = self.observation_store.latest_book(token)
+                if book is not None:
+                    age_seconds = (now - datetime.fromisoformat(book["received_at"])).total_seconds()
+                    book["age_seconds"] = round(age_seconds, 3)
+                    # Future-dated or old snapshots must never look executable.
+                    book["stale"] = not current or age_seconds > 20 or age_seconds < -2
+                books[outcome] = book
+        except (psycopg.Error, OSError, ValueError, KeyError, json.JSONDecodeError):
+            self._send(503, {"error": "orderbook_database_unavailable"})
+            return
+        self._send(200, {"mode": "READ_ONLY", "slug": slug, "books": books,
+                         "live_trading_enabled": False})
+
+    def _serve_observations(self, query: str) -> None:
+        params = parse_qs(query)
+        slug = params.get("slug", [""])[0]
+        try:
+            limit = int(params.get("limit", ["25"])[0])
+            if not SLUG_RE.fullmatch(slug) or not 1 <= limit <= 100:
+                raise ValueError("Invalid slug/limit")
+        except ValueError:
+            self._send(400, {"error": "invalid_slug_or_limit"})
+            return
+        try:
+            observations = self.observation_store.recent(slug, limit=limit)
+        except (psycopg.Error, OSError, ValueError, json.JSONDecodeError):
+            self._send(503, {"error": "observation_database_unavailable"})
+            return
+        self._send(200, {"mode": "READ_ONLY", "observations": observations,
+                         "count": len(observations)})
+
     def do_POST(self) -> None:
         self._send(405, {"error": "read_only_no_trading_endpoints"})
 
@@ -68,12 +126,16 @@ class MarketHandler(BaseHTTPRequestHandler):
         self._send(405, {"error": "read_only_no_trading_endpoints"})
 
 
-def make_server(store: PostgresStore | None = None, port: int = 8787) -> ThreadingHTTPServer:
+def make_server(
+    store: PostgresStore | None = None, port: int = 8787,
+    observation_store: ObservationStore | None = None
+) -> ThreadingHTTPServer:
     if not 0 <= port <= 65535:
         raise ValueError("Invalid port")
     return ThreadingHTTPServer(
         ("127.0.0.1", port),
-        partial(MarketHandler, store=store or PostgresStore()),
+        partial(MarketHandler, store=store or PostgresStore(),
+                observation_store=observation_store or ObservationStore()),
     )
 
 

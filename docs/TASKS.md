@@ -9,13 +9,19 @@
 - [x] Localhost-only Docker infrastructure
 - [x] Fail-closed no-LIVE RiskGate
 - [x] Unit / API tests
-- [ ] Run integration tests against Docker daemon and database
-- [ ] Stream executable order-book depth with sequence/reconnect checks
+- [x] Run PostgreSQL/TimescaleDB and Redis integration tests against local Docker
+- [x] Implement fail-closed public market WebSocket event collector, verified token subscription, PING/reconnect and slot rollover
+- [x] Persist timestamped event observations; dedupe by event digest; Redis full-book-only BBO with TTL
+- [x] Add read-only observation/orderbook APIs and dashboard book panel
+- [ ] Verify sustained, continuous 24/7 ingestion against live Gamma/CLOB from an allowed network
+- [ ] Implement complete order-book reconstruction with sequence/gap reconciliation; current version archives snapshots/deltas only
 - [ ] Verify per-market resolution rules and oracle provenance
 
 ## Phase 2+
-- [ ] Timestamped market observations, lossless historical feeds
+- [x] Versioned schema for timestamped market observations; initial ingestion code (not verified lossless)
+- [ ] Audit and prove lossless ingestion / historical completeness under sustained real traffic
 - [ ] Backtesting with no future leakage and realistic fills/fees
 - [ ] Paper mode + quantitative risk limits and loss budgets
-- [ ] React dashboard and operator audit log
+- [x] React read-only dashboard, historical snapshots and stale order-book indicator
+- [ ] Operator audit log and production monitoring
 - [ ] Isolated signer, full live order reconciliation, security audit

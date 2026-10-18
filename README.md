@@ -71,6 +71,24 @@ The UI refreshes **persisted** snapshots every 12 seconds; it does NOT collect f
 
 To scan separately, run \`.venv/bin/python -m services.market_data.cli --slots 1 --persist --cache\` from the project root. If the Gamma API is unreachable (for example, blocked/reset upstream), the scanner fails closed rather than inventing quotes.
 
+## Phase 1B: Real-time public CLOB collector (read-only)
+
+The collector is an **optional separate process**, not part of the web dashboard.
+Install the updated Python dependencies and migrate PostgreSQL before running:
+
+```bash
+cd ~/Documents/OpenPolyBtcEngine
+.venv/bin/python -m pip install -e .
+.venv/bin/python -m services.market_data.migrate
+.venv/bin/python -m services.market_data.collector --duration-seconds 45
+```
+
+It uses Gamma to discover verified current BTC 5m UP/DOWN token IDs, then subscribes to the public Polymarket CLOB **market WebSocket**; a socket reconnects after failure. It stores timestamped `book`, `price_change`, `last_trade_price`, `tick_size_change`, and `best_bid_ask` events in a TimescaleDB hypertable, using Redis TTL=20s for *complete-book* best bids/asks. No private keys or live trading support.
+
+Read-only API adds `/api/orderbooks?slug=<market-slug>` and `/api/observations?slug=<market-slug>&limit=25`. The dashboard shows archived BBO and distinctly flags missing / stale data. **No claim of guaranteed, continuous, gap-free feed or executable quote.** Network access to Gamma may be unavailable on the local machine; if so the collector reports the failure and does not create synthetic data.
+
+See [stream collector architecture and limitations](docs/STREAM_COLLECTOR.md).
+
 ## Phase 1 scope
 
 - UTC-aligned 300-second slots and strict UP/DOWN token mapping.

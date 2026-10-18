@@ -38,6 +38,14 @@ ON CONFLICT (slug, fetched_at) DO UPDATE SET
     payload_json=EXCLUDED.payload_json
 """
 
+MARKET_BY_SLUG_SQL = """
+SELECT payload_json
+FROM market_snapshots
+WHERE slug = %s AND data_source = 'gamma_public'
+ORDER BY fetched_at DESC
+LIMIT 1
+"""
+
 LATEST_SNAPSHOTS_SQL = """
 SELECT payload_json FROM (
   SELECT DISTINCT ON (slug)
@@ -82,6 +90,18 @@ class PostgresStore:
                     }
                     cur.execute(UPSERT_SNAPSHOT_SQL, record)
         return len(snapshots)
+
+    def verified_market(self, slug: str) -> dict | None:
+        from .models import SLUG_RE
+        if not SLUG_RE.fullmatch(slug):
+            raise ValueError("Invalid market slug")
+        with self._connector(**self.config.connect_kwargs()) as con:
+            with con.cursor() as cur:
+                cur.execute(MARKET_BY_SLUG_SQL, (slug,))
+                row = cur.fetchone()
+        if row is None:
+            return None
+        return row[0] if isinstance(row[0], dict) else json.loads(row[0])
 
     def recent_snapshots(self, limit: int = 20) -> list[dict]:
         if not 1 <= limit <= 50:

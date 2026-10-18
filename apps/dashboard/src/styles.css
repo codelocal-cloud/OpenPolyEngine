@@ -137,4 +137,19 @@ footer span{padding:0 6px}
  .price-box{padding:12px}
  .price-box strong{font-size:25px}
 }
+
+.realtime-panel{padding:23px;margin-bottom:20px}
+.realtime-caption{font-size:12px;color:#8093af;margin:12px 0 18px;max-width:720px}
+.book-cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:13px}
+.book-card{border:1px solid #2b384d;border-radius:10px;background:#182336;padding:16px;min-width:0}
+.book-card-top{display:flex;gap:9px;align-items:center;justify-content:space-between;color:#d3e1f1}
+.book-card-top strong{font-size:13px}
+.book-data{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:14px 0}
+.book-data>div{background:#101a2a;border-radius:8px;padding:13px;min-width:0}
+.book-data span,.book-data strong{display:block}
+.book-data span{font:10px "JetBrains Mono",monospace;color:#7b90ac}
+.book-data strong{font:700 26px "DM Sans",sans-serif;color:#d7e5f7;margin-top:8px}
+.book-card small{color:#8195b0;font-size:11px}
+@media(max-width:600px){.book-cards{grid-template-columns:1fr}}
+
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{transition:none!important;animation:none!important}}

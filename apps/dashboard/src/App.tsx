@@ -24,6 +24,18 @@ type MarketResponse = {
   count: number;
 };
 
+type Book = {
+  book: { best_bid: string | null; best_ask: string | null; outcome: string };
+  received_at: string;
+  stale: boolean;
+  age_seconds: number;
+};
+type BookResponse = {
+  mode: "READ_ONLY";
+  slug: string;
+  books: { UP: Book | null; DOWN: Book | null };
+};
+
 type HealthResponse = {
   status: string;
   mode: string;
@@ -67,6 +79,7 @@ export default function App() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [clock, setClock] = useState(Date.now());
+  const [orderbook, setOrderbook] = useState<BookResponse | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -86,10 +99,30 @@ export default function App() {
         !Array.isArray(data.markets)
       ) throw new Error("API trả về trạng thái khác READ_ONLY; tạm ngừng hiển thị");
       setItems(data.markets);
+      const latest = data.markets
+        .filter(m => m.data_source === "gamma_public")
+        .sort((a,b) => Date.parse(b.fetched_at) - Date.parse(a.fetched_at))[0];
+      if (latest) {
+        try {
+          const bookRes = await fetch(`${API}/api/orderbooks?slug=${encodeURIComponent(latest.slug)}`,
+            { cache: "no-store" });
+          if (bookRes.ok) {
+            const books: BookResponse = await bookRes.json();
+            setOrderbook(books.mode === "READ_ONLY" && books.slug === latest.slug ? books : null);
+          } else {
+            setOrderbook(null);
+          }
+        } catch {
+          setOrderbook(null);
+        }
+      } else {
+        setOrderbook(null);
+      }
       setApiOk(true);
       setLastSync(Date.now());
       setError("");
     } catch (err) {
+      setOrderbook(null);
       setApiOk(false);
       setError(err instanceof Error ? err.message : "Không thể kết nối API");
     } finally {
@@ -225,6 +258,33 @@ export default function App() {
             <div className="information-box"><div className="info-heading">Thông tin quan trọng</div><p>API chỉ xác nhận truy cập PostgreSQL khi đọc thành công. Giao diện chưa xác minh riêng trạng thái Redis hoặc kết nối WebSocket.</p></div>
           </section>
         </div>
+
+        <section className="panel realtime-panel">
+          <div className="panel-heading">
+            <div><div className="eyebrow">CLOB L2 · PUBLIC WEBSOCKET</div><h2>Order Book — Best Bid / Ask</h2></div>
+            <span className="tag tag-indigo">SNAPSHOT ONLY</span>
+          </div>
+          <p className="realtime-caption">
+            Hiển thị bid/ask lấy từ snapshot order book đầy đủ đã lưu trong TimescaleDB.
+            Không dùng thay thế sổ lệnh realtime nếu feed mất kết nối.
+          </p>
+          <div className="book-cards">
+            {(["UP","DOWN"] as const).map(outcome => {
+              const item = orderbook?.books[outcome] ?? null;
+              const age = item ? (clock - Date.parse(item.received_at)) / 1000 : Infinity;
+              const stale = !item || item.stale || age > 20;
+              return <div className="book-card" key={outcome}>
+                <div className="book-card-top"><strong>{outcome === "UP" ? "▲ UP" : "▼ DOWN"}</strong>
+                  <span className={stale ? "tag tag-amber" : "tag tag-green"}>{stale ? "CHƯA CÓ / STALE" : "FRESH"}</span></div>
+                <div className="book-data">
+                  <div><span>BEST BID</span><strong>{item ? fmtPrice(item.book.best_bid) : "—"}</strong></div>
+                  <div><span>BEST ASK</span><strong>{item ? fmtPrice(item.book.best_ask) : "—"}</strong></div>
+                </div>
+                <small>{item ? `Nhận lúc ${fmtTime(item.received_at)} · ${Math.max(0,Math.round(age))}s trước` : "Đang chờ snapshot book thật từ CLOB"}</small>
+              </div>;
+            })}
+          </div>
+        </section>
 
         <section className="panel table-panel">
           <div className="table-toolbar">
