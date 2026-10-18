@@ -1,9 +1,28 @@
-# OpenPolyEngine — Phase 1 (read-only)
+# OpenPolyEngine — Research & Paper Trading
 
 Security-first research foundation for Polymarket BTC Up/Down **5-minute** markets.
 
 > **NO LIVE TRADING.** No private key, trading SDK, wallets, signed transactions,
 > live order routes, or authorization to place any order.
+>
+> **PAPER TRADING** supports manual BUY/SELL with simulated USD only.
+> `demo` is explicitly synthetic; `clob` refuses stale or absent real order books.
+
+## Agent skills (Codex + Claude Code)
+
+This repository includes the [CodeLocal Skills / master-skill](https://github.com/0xmarkhydra/master-skill) kit
+at source revision `a0d9aa0`: nine skills under each of `.agents/skills/` (Codex)
+and `.claude/skills/` (Claude Code). The install preserves project-specific
+safety instructions in `AGENTS.md`; `CLAUDE.md` also directs agents to read
+`AGENTS.md`. Third-party Ponytail MIT attribution lives under
+`.codelocal-skills/ponytail/`. Skill files are instructions for coding
+agents, **not executable plugins** or background automation.
+
+To inspect installed skills, open `.agents/skills/backend-engineering/SKILL.md`,
+`.agents/skills/react-frontend-engineering/SKILL.md`,
+`.agents/skills/ios-inspired-ui-design/SKILL.md`, or
+`.agents/skills/ponytail/SKILL.md`. For updates, review a newer upstream revision
+before re-running the conflict-safe installer; do not blindly overwrite local policies.
 
 ## Core infrastructure
 
@@ -18,7 +37,7 @@ Security-first research foundation for Polymarket BTC Up/Down **5-minute** marke
 Docker Desktop needs to be running; Python 3.11+ is required:
 
 ```bash
-cd ~/Documents/polybtc-engine
+cd ~/Documents/OpenPolyBtcEngine
 python3 scripts/init_local_env.py
 # Generates .env with independent random credentials and mode 0600.
 docker compose up -d
@@ -53,11 +72,11 @@ Integration tests use the local Docker database when `POLYBTC_RUN_DB_TESTS=1` an
 
 ## Open the dashboard locally
 
-The read-only React/Vite dashboard is available at **http://127.0.0.1:5173** when Vite is running.
+The local React/Vite market and paper-trading dashboard is available at **http://127.0.0.1:5173** when Vite is running.
 
 Use two terminal windows from the project root:
 
-\`\`\`bash
+```bash
 # Terminal 1: run the local API, backed by PostgreSQL
 .venv/bin/python -m services.api.server
 
@@ -65,11 +84,11 @@ Use two terminal windows from the project root:
 cd apps/dashboard
 npm ci
 npm run dev
-\`\`\`
+```
 
 The UI refreshes **persisted** snapshots every 12 seconds; it does NOT collect fresh Polymarket data by itself. Gamma snapshots and synthetic fixtures are labeled separately, with stale Gamma observations clearly flagged. API binds to 127.0.0.1:8787.
 
-To scan separately, run \`.venv/bin/python -m services.market_data.cli --slots 1 --persist --cache\` from the project root. If the Gamma API is unreachable (for example, blocked/reset upstream), the scanner fails closed rather than inventing quotes.
+To scan separately, run `.venv/bin/python -m services.market_data.cli --slots 1 --persist --cache` from the project root. If the Gamma API is unreachable (for example, blocked/reset upstream), the scanner fails closed rather than inventing quotes.
 
 ## Phase 1B: Real-time public CLOB collector (read-only)
 
@@ -88,6 +107,12 @@ It uses Gamma to discover verified current BTC 5m UP/DOWN token IDs, then subscr
 Read-only API adds `/api/orderbooks?slug=<market-slug>` and `/api/observations?slug=<market-slug>&limit=25`. The dashboard shows archived BBO and distinctly flags missing / stale data. **No claim of guaranteed, continuous, gap-free feed or executable quote.** Network access to Gamma may be unavailable on the local machine; if so the collector reports the failure and does not create synthetic data.
 
 See [stream collector architecture and limitations](docs/STREAM_COLLECTOR.md).
+
+## Phase 2A: Paper Trading with virtual dollars
+
+The localhost dashboard now has a **Paper Trading** panel for both manual BUY UP / BUY DOWN and SELL ALL. Starting virtual balance is $1,000 per isolated account (`demo` vs `clob`), with a per-buy limit of $50, total open cost cap $250, simulated 0.5% fees, persistent position and cash ledger, and request idempotency. **No exchange orders are ever submitted.**
+
+The offline demo uses explicitly **synthetic**, constant bid/ask 48¢/52¢ even if Gamma/CLOB is down. This supports testing UI/accounting only, not a predictive signal. CLOB Paper demands a fresh, verified real full-book event and will reject otherwise. There is **no automatic settlement, confirmed winning outcome, unrealized P&L, or verified exchange fees** yet. See [Paper Trading documentation](docs/PAPER_TRADING.md).
 
 ## Phase 1 scope
 
