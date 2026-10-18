@@ -126,17 +126,33 @@ def verified_clob_quote(con: psycopg.Connection, now: datetime, outcome: str) ->
         if not isinstance(token, str) or not token.isdigit():
             raise PaperTradeRejected("No verified token for outcome")
         cur.execute(
-            """SELECT payload, observed_at, received_at
+            """SELECT payload, observed_at, received_at, event_type
                FROM market_observations
-               WHERE source = 'polymarket_clob_ws' AND event_type = 'book'
+               WHERE source = 'polymarket_clob_ws'
+                 AND event_type IN ('book', 'price_change', 'best_bid_ask', 'tick_size_change')
                  AND instrument = %s AND slug = %s
-               ORDER BY observed_at DESC, received_at DESC LIMIT 1""",
+               ORDER BY received_at DESC, observed_at DESC, source_event_id DESC LIMIT 1""",
             (token, slug),
         )
-        book = cur.fetchone()
-    if not book:
-        raise PaperTradeRejected("No archived full CLOB orderbook")
-    payload, observed_at, received_at = book
+        latest_event = cur.fetchone()
+        if not latest_event:
+            raise PaperTradeRejected("No archived full CLOB orderbook")
+        payload, observed_at, received_at, event_type = latest_event
+        if event_type != "book":
+            raise PaperTradeRejected("Orderbook changed since full snapshot; wait for fresh book")
+        # Fail closed if any book-changing event shares the latest receive
+        # timestamp: an ordering tie cannot establish snapshot freshness.
+        cur.execute(
+            """SELECT EXISTS (
+                 SELECT 1 FROM market_observations
+                 WHERE source='polymarket_clob_ws' AND slug=%s AND instrument=%s
+                   AND event_type IN ('price_change','best_bid_ask','tick_size_change')
+                   AND received_at >= %s
+               )""",
+            (slug, token, received_at),
+        )
+        if cur.fetchone()[0]:
+            raise PaperTradeRejected("Unreconciled book update; wait for fresh snapshot")
     if not (0 <= (now - received_at).total_seconds() <= MAX_QUOTE_AGE_SECONDS):
         raise PaperTradeRejected("Orderbook expired / clock drift")
     if observed_at > now or observed_at > received_at:
@@ -218,6 +234,34 @@ class PaperEngine:
                  "source": row[11], "executed_at": row[12].isoformat()}
                 for row in orders
             ],
+        }
+
+    def request_status(self, account: str, raw_request_id: str) -> dict:
+        """Retrieve a previously committed paper order after an ambiguous POST."""
+        if account not in ("demo", "clob"):
+            raise PaperTradeRejected("Invalid paper account")
+        request_id = parse_request_id(raw_request_id)
+        with self._connect() as con:
+            with con.cursor() as cur:
+                cur.execute(
+                    """SELECT order_id, side, slug, outcome, quantity, price,
+                              notional, cash_delta, source, executed_at
+                       FROM paper_orders WHERE account_id=%s AND request_id=%s""",
+                    (account, request_id),
+                )
+                row = cur.fetchone()
+        if row is None:
+            return {"mode": "PAPER_ONLY", "account": account,
+                    "request_id": str(request_id), "found": False}
+        return {
+            "mode": "PAPER_ONLY", "account": account,
+            "request_id": str(request_id), "found": True,
+            "order": {
+                "order_id": str(row[0]), "side": row[1], "slug": row[2],
+                "outcome": row[3], "quantity": str(row[4]), "price": str(row[5]),
+                "notional": str(row[6]), "cash_delta": str(row[7]),
+                "source": row[8], "executed_at": row[9].isoformat(),
+            },
         }
 
     def execute(self, account: str, req: dict) -> dict:

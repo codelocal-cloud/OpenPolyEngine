@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type Market = {
   slug: string;
@@ -55,6 +55,11 @@ type PaperQuote = {
   slug: string; outcome: "UP" | "DOWN"; best_bid: string; best_ask: string;
   bid_size: string; ask_size: string; source: string; mode: "PAPER_ONLY";
 };
+type PendingPaper = {
+  account: "demo" | "clob";
+  request: { request_id: string; side: "BUY" | "SELL"; outcome: "UP" | "DOWN";
+    slug?: string; spend_usd?: string };
+};
 type HealthResponse = {
   status: string;
   mode: string;
@@ -106,8 +111,11 @@ export default function App() {
   const [paperBusy, setPaperBusy] = useState(false);
   const [paperNotice, setPaperNotice] = useState("");
   const [paperError, setPaperError] = useState("");
+  const [pendingPaper, setPendingPaper] = useState<PendingPaper | null>(null);
+  const refreshSerial = useRef(0);
 
   const refresh = useCallback(async () => {
+    const serial = ++refreshSerial.current;
     setLoading(true);
     try {
       const [healthRes, marketsRes] = await Promise.all([
@@ -124,23 +132,29 @@ export default function App() {
         data.mode !== "READ_ONLY" ||
         !Array.isArray(data.markets)
       ) throw new Error("API trả về trạng thái khác READ_ONLY; tạm ngừng hiển thị");
+      if (serial !== refreshSerial.current) return;
       setItems(data.markets);
       try {
         const paperRes = await fetch(`${API}/api/paper/state?account=${paperAccount}`, { cache: "no-store" });
         if (paperRes.ok) {
           const nextPaper: PaperState = await paperRes.json();
-          setPaper(nextPaper.mode === "PAPER_ONLY" ? nextPaper : null);
-        } else setPaper(null);
+          if (serial === refreshSerial.current)
+            setPaper(nextPaper.mode === "PAPER_ONLY" && nextPaper.account === paperAccount ? nextPaper : null);
+        } else if (serial === refreshSerial.current) setPaper(null);
         const quotes = await Promise.all((["UP", "DOWN"] as const).map(async outcome => {
           const response = await fetch(`${API}/api/paper/quote?account=${paperAccount}&outcome=${outcome}`,
             { cache: "no-store" });
           return response.ok ? await response.json() as PaperQuote : null;
         }));
-        setPaperQuotes(quotes.filter((v): v is PaperQuote => v !== null && v.mode === "PAPER_ONLY"));
+        if (serial === refreshSerial.current)
+          setPaperQuotes(quotes.filter((v): v is PaperQuote => v !== null && v.mode === "PAPER_ONLY"));
       } catch {
-        setPaper(null);
-        setPaperQuotes([]);
+        if (serial === refreshSerial.current) {
+          setPaper(null);
+          setPaperQuotes([]);
+        }
       }
+      if (serial !== refreshSerial.current) return;
       const latest = data.markets
         .filter(m => m.data_source === "gamma_public")
         .sort((a,b) => Date.parse(b.fetched_at) - Date.parse(a.fetched_at))[0];
@@ -160,43 +174,92 @@ export default function App() {
       } else {
         setOrderbook(null);
       }
-      setApiOk(true);
-      setLastSync(Date.now());
-      setError("");
+      if (serial === refreshSerial.current) {
+        setApiOk(true);
+        setLastSync(Date.now());
+        setError("");
+      }
     } catch (err) {
-      setOrderbook(null);
-      setApiOk(false);
-      setPaper(null);
-      setPaperQuotes([]);
-      setError(err instanceof Error ? err.message : "Không thể kết nối API");
+      if (serial === refreshSerial.current) {
+        setOrderbook(null);
+        setApiOk(false);
+        setPaper(null);
+        setPaperQuotes([]);
+        setError(err instanceof Error ? err.message : "Không thể kết nối API");
+      }
     } finally {
-      setLoading(false);
+      if (serial === refreshSerial.current) setLoading(false);
     }
   }, [paperAccount]);
 
-  const placePaper = async (side: "BUY" | "SELL", outcome: "UP" | "DOWN", slug?: string) => {
-    if (paperBusy) return;
+  const submitPaper = async (pending: PendingPaper) => {
     setPaperBusy(true);
     setPaperError("");
     setPaperNotice("");
     try {
-      const quote = paperQuotes.find(v => v.outcome === outcome);
-      const request = {
+      const response = await fetch(`${API}/api/paper/orders?account=${pending.account}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-OpenPoly-Paper": "1" },
+        body: JSON.stringify(pending.request),
+        signal: AbortSignal.timeout(10000),
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        // Known 4xx rejections did not execute; a 5xx/network timeout can
+        // be ambiguous, so retain the original UUID for a safe retry.
+        if (response.status >= 400 && response.status < 500) {
+          setPendingPaper(null);
+          setPaperError(result.reason ?? result.error ?? "Yêu cầu Paper bị từ chối");
+          return;
+        }
+        throw new Error(result.reason ?? result.error ?? "Paper order failed");
+      }
+      setPendingPaper(null);
+      setPaperNotice(`${pending.request.side} ${pending.request.outcome} đã ghi sổ (${result.source === "synthetic_demo" ? "DEMO giả lập" : "CLOB paper"}); giá ${fmtPrice(result.price)}.`);
+      void refresh();
+    } catch (err) {
+      setPaperError(`${err instanceof Error ? err.message : "Không có phản hồi từ API"}. Nếu mạng bị ngắt, hãy kiểm tra mã lệnh trước khi thử lại.`);
+    } finally {
+      setPaperBusy(false);
+    }
+  };
+
+  const placePaper = (side: "BUY" | "SELL", outcome: "UP" | "DOWN", slug?: string) => {
+    if (paperBusy || pendingPaper) return;
+    const quote = paperQuotes.find(v => v.outcome === outcome);
+    const pending: PendingPaper = {
+      account: paperAccount,
+      request: {
         request_id: crypto.randomUUID(), side, outcome,
         ...(side === "BUY" ? {spend_usd: paperStake} : {}),
         slug: slug ?? quote?.slug,
-      };
-      const response = await fetch(`${API}/api/paper/orders?account=${paperAccount}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-OpenPoly-Paper": "1" },
-        body: JSON.stringify(request),
-      });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.reason ?? result.error ?? "Paper order failed");
-      setPaperNotice(`${side} ${outcome} đã ghi sổ (${result.source === "synthetic_demo" ? "DEMO giả lập" : "CLOB paper"}); giá ${fmtPrice(result.price)}, phí giả định ${result.fee} USD.`);
-      await refresh();
+      },
+    };
+    setPendingPaper(pending);
+    void submitPaper(pending);
+  };
+
+  const verifyPendingPaper = async () => {
+    if (!pendingPaper || paperBusy) return;
+    setPaperBusy(true);
+    setPaperError("");
+    try {
+      const response = await fetch(
+        `${API}/api/paper/request?account=${pendingPaper.account}&request_id=${encodeURIComponent(pendingPaper.request.request_id)}`,
+        { cache: "no-store", signal: AbortSignal.timeout(10000) },
+      );
+      if (!response.ok) throw new Error("Không đọc được trạng thái lệnh");
+      const data: { mode: "PAPER_ONLY"; found: boolean } = await response.json();
+      if (data.mode !== "PAPER_ONLY") throw new Error("Phản hồi không phải Paper Trading");
+      if (data.found) {
+        setPendingPaper(null);
+        setPaperNotice("Lệnh đã được ghi sổ trước đó; không gửi thêm lệnh trùng.");
+        void refresh();
+      } else {
+        setPaperNotice("Chưa tìm thấy lệnh đã ghi. Có thể thử lại BẰNG CÙNG MÃ yêu cầu để tránh trừ tiền hai lần.");
+      }
     } catch (err) {
-      setPaperError(err instanceof Error ? err.message : "Không ghi được lệnh ảo");
+      setPaperError(err instanceof Error ? err.message : "Không thể kiểm tra trạng thái");
     } finally {
       setPaperBusy(false);
     }
@@ -366,12 +429,12 @@ export default function App() {
           <div className="paper-switch" role="group" aria-label="Chế độ tài khoản ảo">
             <button type="button" aria-pressed={paperAccount === "demo"}
               className={paperAccount === "demo" ? "active" : ""}
-              onClick={() => {setPaperAccount("demo");setPaperNotice("");setPaperError("");}}>
+              onClick={() => {refreshSerial.current++;setPaper(null);setPaperQuotes([]);setPaperAccount("demo");setPaperNotice("");setPaperError("");}}>
               Demo offline (giá giả lập)
             </button>
             <button type="button" aria-pressed={paperAccount === "clob"}
               className={paperAccount === "clob" ? "active" : ""}
-              onClick={() => {setPaperAccount("clob");setPaperNotice("");setPaperError("");}}>
+              onClick={() => {refreshSerial.current++;setPaper(null);setPaperQuotes([]);setPaperAccount("clob");setPaperNotice("");setPaperError("");}}>
               CLOB Paper (order book thật)
             </button>
           </div>
@@ -396,13 +459,25 @@ export default function App() {
           <div className="paper-trade-buttons">
             {(["UP", "DOWN"] as const).map(outcome => {
               const quote = paperQuotes.find(q => q.outcome === outcome);
-              return <button key={outcome} type="button" disabled={paperBusy || !paper || !quote}
+              return <button key={outcome} type="button" disabled={paperBusy || !!pendingPaper || !paper || !quote}
                 className={outcome === "UP" ? "paper-buy-up" : "paper-buy-down"}
                 onClick={()=>void placePaper("BUY",outcome)}>
                 {paperBusy ? "Đang ghi lệnh..." : `BUY ${outcome} · ${quote ? fmtPrice(quote.best_ask) : "Không có quote"}`}
               </button>;
             })}
           </div>
+          {pendingPaper && <div className="paper-pending" role="status">
+            <strong>Yêu cầu Paper chưa được xác nhận</strong>
+            <p>{pendingPaper.request.side} {pendingPaper.request.outcome} · {pendingPaper.account.toUpperCase()} · Mã {pendingPaper.request.request_id}</p>
+            <div className="paper-pending-actions">
+              <button type="button" disabled={paperBusy} onClick={() => void verifyPendingPaper()}>
+                Kiểm tra lệnh đã ghi
+              </button>
+              <button type="button" disabled={paperBusy} onClick={() => void submitPaper(pendingPaper)}>
+                Thử lại cùng mã (không ghi trùng)
+              </button>
+            </div>
+          </div>}
           {paperNotice && <div className="paper-notice" role="status">{paperNotice}</div>}
           {paperError && <div className="paper-error" role="alert">{paperError}</div>}
           <div className="paper-holdings">
@@ -411,7 +486,7 @@ export default function App() {
             {paper?.positions.map(position => <div className="paper-position" key={position.slug + position.outcome}>
               <div><strong>{position.outcome} · {position.quantity} shares</strong>
                 <small>{position.slug} · Giá vốn {Number(position.cost_basis).toFixed(2)} USD</small></div>
-              <button disabled={paperBusy || (paperAccount === "clob" && !paperQuotes.some(q => q.slug === position.slug && q.outcome === position.outcome))}
+              <button disabled={paperBusy || !!pendingPaper || (paperAccount === "clob" && !paperQuotes.some(q => q.slug === position.slug && q.outcome === position.outcome))}
                 type="button" onClick={() => void placePaper("SELL", position.outcome, position.slug)}>SELL ALL (ảo)</button>
             </div>)}
             <h3>Lịch sử lệnh ảo</h3>

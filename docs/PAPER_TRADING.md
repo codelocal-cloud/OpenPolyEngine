@@ -30,6 +30,8 @@ Mở **http://127.0.0.1:5173/** và chọn **Demo offline**. Nhập 1–50 USD �
 Các endpoint:
 - `GET /api/paper/state?account=demo|clob`
 - `GET /api/paper/quote?account=demo|clob&outcome=UP|DOWN`
+- `GET /api/paper/request?account=demo|clob&request_id=<UUID-v4>` — kiểm tra một yêu cầu đã ghi sổ sau khi POST không trả kết quả rõ ràng; kết quả được scoped theo tài khoản. UI cho phép thử lại **cùng UUID và payload** (không tự tạo lệnh mới).
+- CLOB Paper từ chối khớp nếu có `price_change`, `tick_size_change` hoặc `best_bid_ask` mới hơn / cùng thời điểm receive với snapshot `book` mới nhất. Cần snapshot đầy đủ mới để ghi paper fills; **chưa có cơ chế tái dựng order book bằng delta**.
 - `POST /api/paper/orders?account=demo|clob` — header `Content-Type: application/json`, `X-OpenPoly-Paper: 1`; JSON `{"request_id":"<UUID-v4>","side":"BUY","outcome":"UP","spend_usd":"10.00","slug":"<current-slug>"}`. SELL dùng `side: "SELL"`, `outcome`, `slug`, không có `spend_usd`.
 
 Tests:

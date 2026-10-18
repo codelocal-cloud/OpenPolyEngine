@@ -57,6 +57,12 @@ class PaperIntegrationTest(unittest.TestCase):
             self.assertEqual(buy["mode"], "PAPER_ONLY")
             self.assertTrue(Decimal(buy["cash_delta"]) < 0)
             self.assertEqual(paper.execute("demo", request)["duplicate"], True)
+            found = paper.request_status("demo", request["request_id"])
+            self.assertTrue(found["found"])
+            self.assertEqual(found["order"]["outcome"], "UP")
+            self.assertEqual(found["order"]["side"], "BUY")
+            self.assertFalse(paper.request_status("demo", str(uuid4()))["found"])
+            self.assertFalse(paper.request_status("clob", request["request_id"])["found"])
             with self.assertRaises(PaperTradeRejected):
                 paper.execute("demo", {**request, "spend_usd":"20"})
             after_buy = paper.state("demo")

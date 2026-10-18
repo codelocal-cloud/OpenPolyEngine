@@ -185,4 +185,9 @@ footer span{padding:0 6px}
 .paper-history-row>span:last-child{text-align:right;white-space:nowrap;font-size:12px;font-weight:700}
 .paper-disclaimer{margin:20px 0 0;font-size:11px;color:#b6a585;line-height:1.7;border-top:1px solid #263449;padding-top:15px}
 @media(max-width:650px){.paper-metrics{grid-template-columns:1fr}.paper-trade-buttons{grid-template-columns:1fr}.paper-switch{width:100%}}
+.paper-pending{padding:14px;margin:12px 0;background:#353020;border:1px solid #87713b;color:#ffe3a5;border-radius:9px;font-size:12px}
+.paper-pending p{overflow-wrap:anywhere;margin:6px 0 10px}
+.paper-pending-actions{display:flex;gap:8px;flex-wrap:wrap}
+.paper-pending-actions button{padding:9px 11px;background:#47412e;border:1px solid #887148;color:#f5dda6;border-radius:7px;cursor:pointer;font-size:11px;font-weight:700}
+.paper-pending-actions button:disabled{opacity:.5;cursor:wait}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{transition:none!important;animation:none!important}}

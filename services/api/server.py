@@ -50,15 +50,18 @@ class MarketHandler(BaseHTTPRequestHandler):
         if uri.path == "/health":
             self._send(200, {"status": "ok", "mode": "READ_ONLY", "trading_enabled": False})
             return
-        if uri.path in ("/api/paper/state", "/api/paper/quote"):
+        if uri.path in ("/api/paper/state", "/api/paper/quote", "/api/paper/request"):
             params = parse_qs(uri.query)
             account = params.get("account", ["demo"])[0]
             try:
+                paper = self.paper_engine or PaperEngine()
                 if uri.path == "/api/paper/state":
-                    result = (self.paper_engine or PaperEngine()).state(account)
+                    result = paper.state(account)
+                elif uri.path == "/api/paper/request":
+                    result = paper.request_status(account, params.get("request_id", [""])[0])
                 else:
                     outcome = params.get("outcome", [""])[0]
-                    result = (self.paper_engine or PaperEngine()).quote(account, outcome)
+                    result = paper.quote(account, outcome)
             except PaperTradeRejected as exc:
                 self._send(422, {"error": "paper_rejected", "reason": str(exc)})
                 return

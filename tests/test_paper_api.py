@@ -8,7 +8,7 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from services.api.server import make_server
-from services.paper_trading.engine import PaperTradeRejected
+from services.paper_trading.engine import PaperTradeRejected, parse_request_id
 
 
 class StubMarketStore:
@@ -35,6 +35,12 @@ class StubPaperEngine:
     def execute(self, account, request):
         self.calls.append((account, request))
         return {"mode": "PAPER_ONLY", "source": "synthetic_demo", "duplicate": False}
+    def request_status(self, account, request_id):
+        parse_request_id(request_id)
+        if account not in ("demo", "clob"):
+            raise PaperTradeRejected("Invalid paper account")
+        return {"mode": "PAPER_ONLY", "account": account, "request_id": request_id,
+                "found": account == "demo" and request_id == "e7382c97-3322-43a0-9217-a0da59169ef2"}
 
 
 class PaperApiTest(unittest.TestCase):
@@ -59,6 +65,16 @@ class PaperApiTest(unittest.TestCase):
             self.assertEqual(json.loads(response.read())["cash_balance"], "1000")
         with urlopen(self.base + "/api/paper/quote?account=demo&outcome=UP", timeout=3) as response:
             self.assertEqual(json.loads(response.read())["source"], "synthetic_demo")
+
+    def test_request_lookup_is_scoped_and_validated(self):
+        rid = "e7382c97-3322-43a0-9217-a0da59169ef2"
+        with urlopen(self.base+f"/api/paper/request?account=demo&request_id={rid}", timeout=3) as response:
+            self.assertTrue(json.loads(response.read())["found"])
+        with urlopen(self.base+f"/api/paper/request?account=clob&request_id={rid}", timeout=3) as response:
+            self.assertFalse(json.loads(response.read())["found"])
+        with self.assertRaises(HTTPError) as err:
+            urlopen(self.base+"/api/paper/request?account=demo&request_id=invalid", timeout=3)
+        self.assertEqual(err.exception.code, 422)
 
     def test_post_requires_explicit_paper_header(self):
         body = json.dumps({"side":"BUY"}).encode()
