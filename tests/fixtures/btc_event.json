@@ -1,0 +1,19 @@
+{
+  "id": "sample-event",
+  "slug": "btc-updown-5m-1792368000",
+  "active": true,
+  "closed": false,
+  "resolutionSource": "Verify on original Polymarket market rules",
+  "markets": [
+    {
+      "id": "sample-market",
+      "slug": "btc-updown-5m-1792368000",
+      "active": true,
+      "closed": false,
+      "acceptingOrders": true,
+      "outcomes": "[\"Up\",\"Down\"]",
+      "clobTokenIds": "[\"111111111111\",\"222222222222\"]",
+      "outcomePrices": "[\"0.48\",\"0.52\"]"
+    }
+  ]
+}

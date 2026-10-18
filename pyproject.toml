@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "polybtc-engine"
+version = "0.2.0"
+description = "Read-only Polymarket BTC 5m research with PostgreSQL 17 + TimescaleDB + Redis"
+requires-python = ">=3.11"
+dependencies = [
+  "psycopg[binary]>=3.2.5,<4",
+  "python-dotenv>=1.0,<2",
+  "redis>=5.2,<7",
+]
+
+[tool.setuptools.packages.find]
+include = ["services*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

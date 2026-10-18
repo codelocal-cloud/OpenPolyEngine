@@ -1,0 +1,52 @@
+name: polybtc-engine
+
+services:
+  timescaledb:
+    image: timescale/timescaledb:2.30.2-pg17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POLYBTC_DB_NAME:?Set POLYBTC_DB_NAME in .env}
+      POSTGRES_USER: ${POLYBTC_DB_USER:?Set POLYBTC_DB_USER in .env}
+      POSTGRES_PASSWORD: ${POLYBTC_DB_PASSWORD:?Set POLYBTC_DB_PASSWORD in .env}
+      TIMESCALEDB_TELEMETRY: "off"
+    ports:
+      - "127.0.0.1:${POLYBTC_DB_PORT:-55432}:5432"
+    volumes:
+      - polybtc_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 20s
+    networks:
+      - backend
+    security_opt:
+      - no-new-privileges:true
+
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    environment:
+      REDIS_PASSWORD: ${POLYBTC_REDIS_PASSWORD:?Set POLYBTC_REDIS_PASSWORD in .env}
+    command: ["sh", "-c", "exec redis-server --appendonly yes --requirepass \"$$REDIS_PASSWORD\""]
+    ports:
+      - "127.0.0.1:${POLYBTC_REDIS_PORT:-16379}:6379"
+    volumes:
+      - polybtc_redisdata:/data
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$REDIS_PASSWORD\" redis-cli ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    networks:
+      - backend
+    security_opt:
+      - no-new-privileges:true
+
+networks:
+  backend:
+
+volumes:
+  polybtc_pgdata:
+  polybtc_redisdata:
