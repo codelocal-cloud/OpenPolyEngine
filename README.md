@@ -1,4 +1,4 @@
-# PolyBTC Engine — Phase 1 (read-only)
+# OpenPolyEngine — Phase 1 (read-only)
 
 Security-first research foundation for Polymarket BTC Up/Down **5-minute** markets.
 
@@ -50,6 +50,26 @@ For offline fixture unit tests, a running database isn't required:
 
 Integration tests use the local Docker database when `POLYBTC_RUN_DB_TESTS=1` and
 `POLYBTC_RUN_REDIS_TESTS=1` are set.
+
+## Open the dashboard locally
+
+The read-only React/Vite dashboard is available at **http://127.0.0.1:5173** when Vite is running.
+
+Use two terminal windows from the project root:
+
+\`\`\`bash
+# Terminal 1: run the local API, backed by PostgreSQL
+.venv/bin/python -m services.api.server
+
+# Terminal 2: run the read-only web dashboard
+cd apps/dashboard
+npm ci
+npm run dev
+\`\`\`
+
+The UI refreshes **persisted** snapshots every 12 seconds; it does NOT collect fresh Polymarket data by itself. Gamma snapshots and synthetic fixtures are labeled separately, with stale Gamma observations clearly flagged. API binds to 127.0.0.1:8787.
+
+To scan separately, run \`.venv/bin/python -m services.market_data.cli --slots 1 --persist --cache\` from the project root. If the Gamma API is unreachable (for example, blocked/reset upstream), the scanner fails closed rather than inventing quotes.
 
 ## Phase 1 scope
 
