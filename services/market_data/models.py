@@ -57,6 +57,8 @@ class MarketSnapshot:
     accepting_orders: bool
     resolution_source: str | None
     data_source: str = "gamma_public"
+    fee_rate: Decimal | None = None
+    fee_exponent: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -73,6 +75,8 @@ class MarketSnapshot:
             "closed": self.closed,
             "accepting_orders": self.accepting_orders,
             "resolution_source": self.resolution_source,
+            "fee_rate": str(self.fee_rate) if self.fee_rate is not None else None,
+            "fee_exponent": self.fee_exponent,
             "price_kind": "gamma_indicative_not_executable",
             "data_source": self.data_source,
         }
@@ -133,6 +137,22 @@ def parse_event(event: dict[str, Any], slug: str, fetched_at: datetime | None = 
     if time_read.tzinfo is None or time_read.utcoffset() is None:
         raise MarketParseError("fetched_at must be timezone-aware")
     source = market.get("resolutionSource") or event.get("resolutionSource")
+    raw_fee = market.get("feeSchedule") or event.get("feeSchedule")
+    fee_rate: Decimal | None = None
+    fee_exponent: int | None = None
+    if raw_fee is not None:
+        if not isinstance(raw_fee, dict):
+            raise MarketParseError("Invalid official feeSchedule")
+        try:
+            fee_rate = Decimal(str(raw_fee["rate"]))
+            raw_exponent = raw_fee.get("exponent")
+            if isinstance(raw_exponent, bool) or str(raw_exponent) != "1":
+                raise MarketParseError("Unsupported fee exponent")
+            fee_exponent = 1
+        except (KeyError, InvalidOperation, TypeError, ValueError) as exc:
+            raise MarketParseError("Invalid official fee rate") from exc
+        if not fee_rate.is_finite() or not 0 <= fee_rate <= Decimal("0.5"):
+            raise MarketParseError("Official fee rate out of range")
     return MarketSnapshot(
         slug=slug,
         market_id=str(market.get("id", "")),
@@ -148,4 +168,6 @@ def parse_event(event: dict[str, Any], slug: str, fetched_at: datetime | None = 
         accepting_orders=market.get("acceptingOrders") is True,
         resolution_source=str(source) if source is not None else None,
         data_source=data_source,
+        fee_rate=fee_rate,
+        fee_exponent=fee_exponent,
     )

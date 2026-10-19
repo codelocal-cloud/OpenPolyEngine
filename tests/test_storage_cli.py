@@ -75,6 +75,7 @@ class StorageCliTest(unittest.TestCase):
         store = PostgresStore(CONFIG, connector=lambda **kw: connection)
         self.assertEqual(store.recent_snapshots(2), [expected])
         self.assertEqual(connection.cur.statements[0][1], (2,))
+        self.assertIn("data_source = 'gamma_public'", connection.cur.statements[0][0])
         for limit in (0, 51):
             with self.assertRaises(ValueError):
                 store.recent_snapshots(limit)
@@ -86,24 +87,24 @@ class StorageCliTest(unittest.TestCase):
             append_jsonl(path, [market])
             self.assertEqual(json.loads(path.read_text().strip())["slug"], EVENT["slug"])
 
-    def test_offline_cli_without_database(self):
-        output = io.StringIO()
-        with redirect_stdout(output):
-            code = main(["--slots", "1", "--at", AT.isoformat(),
-                         "--offline-fixture", str(FIXTURE), "--json"])
-        self.assertEqual(code, 0)
-        payload = json.loads(output.getvalue())
-        self.assertEqual(payload["mode"], "READ_ONLY")
-        self.assertEqual(payload["results"][0]["market"]["data_source"], "offline_fixture")
-
-    def test_offline_cli_persists_only_when_requested(self):
-        with patch("services.market_data.cli.PostgresStore") as postgres:
+    def test_cli_accepts_only_verified_gamma(self):
+        market = parse_event(EVENT, EVENT["slug"], fetched_at=AT)
+        with patch("services.market_data.cli.GammaClient") as gamma, \
+             patch("services.market_data.cli.PostgresStore") as postgres:
+            gamma.return_value.fetch_snapshot.return_value = market
             output = io.StringIO()
             with redirect_stdout(output):
-                self.assertEqual(main(["--slots", "1", "--at", AT.isoformat(),
-                                       "--offline-fixture", str(FIXTURE), "--persist"]), 0)
+                result = main(["--slots", "1", "--at", AT.isoformat(), "--persist", "--json"])
+            self.assertEqual(result, 0)
+            data = json.loads(output.getvalue())
+            self.assertEqual(data["source"], "gamma_public")
+            self.assertEqual(data["results"][0]["market"]["data_source"], "gamma_public")
             postgres.return_value.write_snapshots.assert_called_once()
-            self.assertEqual(postgres.return_value.write_snapshots.call_args.args[0][0].data_source, "offline_fixture")
+
+    def test_fixture_arg_is_no_longer_supported(self):
+        with redirect_stdout(io.StringIO()), self.assertRaises(SystemExit) as error:
+            main(["--offline-fixture", str(FIXTURE), "--slots", "1"])
+        self.assertEqual(error.exception.code, 2)
 
     def test_cli_rejects_naive_timestamp(self):
         with redirect_stdout(io.StringIO()), self.assertRaises(SystemExit) as error:

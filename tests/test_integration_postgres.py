@@ -22,23 +22,38 @@ class PostgresIntegrationTest(unittest.TestCase):
         import psycopg
         config = PostgresConfig.from_env()
         migrate(config)
-        store = PostgresStore(config)
         at = datetime(2026, 10, 19, 0, 0, 23, tzinfo=timezone.utc)
         synthetic = parse_event(EVENT, EVENT["slug"], fetched_at=at, data_source="offline_fixture")
-        self.assertEqual(store.write_snapshots([synthetic]), 1)
-        self.assertEqual(store.write_snapshots([synthetic]), 1)
-        latest = store.recent_snapshots(50)
-        self.assertIn(synthetic.slug, [r["slug"] for r in latest])
-        with psycopg.connect(**config.connect_kwargs()) as con:
-            hypertable = con.execute(
+        with self.assertRaisesRegex(ValueError, "Only verified Gamma"):
+            PostgresStore(config).write_snapshots([synthetic])
+
+        # Unit fixture is shaped like a Gamma response, but is NEVER committed
+        # into the operator's data store or exposed by production APIs.
+        raw = psycopg.connect(**config.connect_kwargs())
+        class Shared:
+            def __enter__(self):
+                return raw
+            def __exit__(self, *args):
+                return False
+        try:
+            store = PostgresStore(config, connector=lambda **kw: Shared())
+            test_market = parse_event(EVENT, EVENT["slug"], fetched_at=at)
+            self.assertEqual(store.write_snapshots([test_market]), 1)
+            self.assertEqual(store.write_snapshots([test_market]), 1)
+            self.assertTrue(all(item["data_source"] == "gamma_public"
+                                for item in store.recent_snapshots(50)))
+            hypertable = raw.execute(
                 "SELECT COUNT(*) FROM timescaledb_information.hypertables WHERE hypertable_name='market_snapshots'"
             ).fetchone()[0]
             self.assertEqual(hypertable, 1)
-            count = con.execute(
+            count = raw.execute(
                 "SELECT COUNT(*) FROM market_snapshots WHERE slug=%s AND fetched_at=%s",
-                (synthetic.slug, synthetic.fetched_at),
+                (test_market.slug, test_market.fetched_at),
             ).fetchone()[0]
             self.assertEqual(count, 1)
+        finally:
+            raw.rollback()
+            raw.close()
 
     def test_observation_hypertable_and_idempotent_write(self):
         import psycopg

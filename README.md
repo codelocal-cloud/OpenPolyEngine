@@ -1,126 +1,96 @@
-# OpenPolyEngine — Research & Paper Trading
+# OpenPolyEngine — Real Polymarket data only
 
-Security-first research foundation for Polymarket BTC Up/Down **5-minute** markets.
+Open-source BTC Up/Down 5-minute research and **paper-only** execution with PostgreSQL 17 + TimescaleDB and Redis.
 
-> **NO LIVE TRADING.** No private key, trading SDK, wallets, signed transactions,
-> live order routes, or authorization to place any order.
->
-> **PAPER TRADING** supports manual BUY/SELL with simulated USD only.
-> `demo` is explicitly synthetic; `clob` refuses stale or absent real order books.
+**No demo market data, no fabricated prices, no private keys, and no live orders.**
+The dashboard never displays historical fixtures as current prices. Its BUY/SELL
+buttons remain disabled until both verified current BTC 5-minute market metadata
+and a fresh, complete public Polymarket CLOB orderbook are available. The engine
+also requires an **official feeSchedule from Gamma**: when fee metadata is absent
+or a price-changing delta overtakes the snapshot, it refuses to simulate a fill.
 
-## Agent skills (Codex + Claude Code)
-
-This repository includes the [CodeLocal Skills / master-skill](https://github.com/0xmarkhydra/master-skill) kit
-at source revision `a0d9aa0`: nine skills under each of `.agents/skills/` (Codex)
-and `.claude/skills/` (Claude Code). The install preserves project-specific
-safety instructions in `AGENTS.md`; `CLAUDE.md` also directs agents to read
-`AGENTS.md`. Third-party Ponytail MIT attribution lives under
-`.codelocal-skills/ponytail/`. Skill files are instructions for coding
-agents, **not executable plugins** or background automation.
-
-To inspect installed skills, open `.agents/skills/backend-engineering/SKILL.md`,
-`.agents/skills/react-frontend-engineering/SKILL.md`,
-`.agents/skills/ios-inspired-ui-design/SKILL.md`, or
-`.agents/skills/ponytail/SKILL.md`. For updates, review a newer upstream revision
-before re-running the conflict-safe installer; do not blindly overwrite local policies.
-
-## Core infrastructure
-
-- **PostgreSQL 17 + TimescaleDB 2.30.2**: sole operational persistent database, hypertables for snapshots and future market observations.
-- **Redis 7.4**: latest non-synthetic market snapshot cache and read-only update channel; TTL of 30 seconds.
-- No local embedded operational database. JSONL is available only as an optional portable research export.
-- Both ports are bound to **127.0.0.1**; database and Redis passwords required.
-- Uses Psycopg 3, versioned idempotent SQL migrations, and parameterized queries.
-
-## Local setup
-
-Docker Desktop needs to be running; Python 3.11+ is required:
+## Run on macOS
 
 ```bash
 cd ~/Documents/OpenPolyBtcEngine
-python3 scripts/init_local_env.py
-# Generates .env with independent random credentials and mode 0600.
 docker compose up -d
-python3 -m venv .venv
 .venv/bin/python -m pip install -e .
 .venv/bin/python -m services.market_data.migrate
-.venv/bin/python -m unittest discover -s tests -v
-```
 
-### Fetch and persist current BTC 5-minute market snapshots
+# Terminal 1: public CLOB collector (NO real trading)
+.venv/bin/python -m services.market_data.collector
 
-```bash
-.venv/bin/python -m services.market_data.cli --slots 3 --persist --cache --json
-.venv/bin/python -m services.api.server
-# In a second terminal:
-curl http://127.0.0.1:8787/api/markets
-```
-
-CLI without `--persist` or `--cache` works as GET-only discovery.
-Snapshots from Gamma show **indicative prices** rather than executable bid/ask.
-Do not rely on Gamma metadata for live trading, probability calibration, or settlement decisions.
-
-For offline fixture unit tests, a running database isn't required:
-
-```bash
-.venv/bin/python -m unittest discover -s tests -v
-.venv/bin/python -m services.market_data.cli --offline-fixture tests/fixtures/btc_event.json --slots 1 --at 2026-10-19T00:00:30+00:00
-```
-
-Integration tests use the local Docker database when `POLYBTC_RUN_DB_TESTS=1` and
-`POLYBTC_RUN_REDIS_TESTS=1` are set.
-
-## Open the dashboard locally
-
-The local React/Vite market and paper-trading dashboard is available at **http://127.0.0.1:5173** when Vite is running.
-
-Use two terminal windows from the project root:
-
-```bash
-# Terminal 1: run the local API, backed by PostgreSQL
+# Terminal 2: local-only read-only/paper API
 .venv/bin/python -m services.api.server
 
-# Terminal 2: run the read-only web dashboard
+# Terminal 3: dashboard
 cd apps/dashboard
 npm ci
 npm run dev
 ```
 
-The UI refreshes **persisted** snapshots every 12 seconds; it does NOT collect fresh Polymarket data by itself. Gamma snapshots and synthetic fixtures are labeled separately, with stale Gamma observations clearly flagged. API binds to 127.0.0.1:8787.
+Open [http://127.0.0.1:5173/](http://127.0.0.1:5173/) on that computer.
 
-To scan separately, run `.venv/bin/python -m services.market_data.cli --slots 1 --persist --cache` from the project root. If the Gamma API is unreachable (for example, blocked/reset upstream), the scanner fails closed rather than inventing quotes.
+The dashboard refreshes every 5 seconds. It always shows the UTC current slot,
+the actual public CLOB best bid/ask *only when sufficiently fresh*, the
+simulation-only CLOB cash ledger, positions and last orders. In the absence of
+verified live data the screen displays **offline / unavailable** and locks trades.
 
-## Phase 1B: Real-time public CLOB collector (read-only)
+## Market data
 
-The collector is an **optional separate process**, not part of the web dashboard.
-Install the updated Python dependencies and migrate PostgreSQL before running:
+- **Gamma API** is the authoritative source of slug/token mapping, market
+  schedule, closed/active state and market-specific `feeSchedule`. Snapshot
+  prices (`outcomePrices`) are indicative **not** executable order prices.
+- **Public CLOB WebSocket** delivers full `book` snapshots, `price_change`,
+  `last_trade_price`, `best_bid_ask` and `tick_size_change` events.
+  TimescaleDB stores normalized observations and provenance; Redis caches
+  fresh full-book quotes for 20 seconds.
+- **Paper Trading** uses the *real* CLOB full-book bid and ask, with strict
+  freshness, no subsequent unreconciled book deltas, Gamma feeSchedule validation,
+  USD-virtual balance and bounded risk checks. A simulated full fill is NOT
+  proof that a real market order would execute at that exact price.
+- All public UI/API `/api/markets` rows are filtered to `gamma_public`.
+  Historical synthetic research rows remain in the database for audit, but no
+  production CLI/endpoint accepts fixtures or generates sample prices.
+- Existing `demo` paper records are preserved for audit but the `demo` account
+  is **disabled at the backend**, not merely hidden in the UI.
+
+**Important network limitation:** On the Mac previously tested, TLS connections
+to `gamma-api.polymarket.com`, `clob.polymarket.com` and
+`data-api.polymarket.com` were reset by peer. Until you have legitimate direct
+access to Polymarket public APIs, no tool can honestly deliver live quotes.
+We never create substitute quotes, relabel archived prices, or bypass
+Polymarket geographic restrictions.
+
+## Safety
+
+- Local API binds to `127.0.0.1:8787` and never signs or sends live orders.
+- The virtual `clob` account starts with $1,000 *simulated USD*, has $1–$50
+  BUY orders and a $250 maximum cost exposure. No automatic market settlement.
+- Paper taker fee uses the per-market Gamma schedule and the publicly documented
+  formula `fee = shares * feeRate * price * (1 - price)`; if missing, no fill.
+  Simulation still estimates fill/fees, not matched venue execution.
+- Transactional ledger, account locks and UUID v4 idempotency prevent double
+  bookkeeping on retries.
+- **No SQLite**, no destructive Docker volume operations, no credentials committed.
+
+See [Paper Trading](docs/PAPER_TRADING.md) and
+[Public CLOB collector](docs/STREAM_COLLECTOR.md) for detailed limitations.
+
+## Tests
 
 ```bash
-cd ~/Documents/OpenPolyBtcEngine
-.venv/bin/python -m pip install -e .
-.venv/bin/python -m services.market_data.migrate
-.venv/bin/python -m services.market_data.collector --duration-seconds 45
+POLYBTC_RUN_DB_TESTS=1 POLYBTC_RUN_REDIS_TESTS=1 \
+  .venv/bin/python -m unittest discover -s tests -q
+cd apps/dashboard && npm run build
 ```
 
-It uses Gamma to discover verified current BTC 5m UP/DOWN token IDs, then subscribes to the public Polymarket CLOB **market WebSocket**; a socket reconnects after failure. It stores timestamped `book`, `price_change`, `last_trade_price`, `tick_size_change`, and `best_bid_ask` events in a TimescaleDB hypertable, using Redis TTL=20s for *complete-book* best bids/asks. No private keys or live trading support.
+Automated parser and database tests use bounded, rollback-only fixture records;
+**they are never inserted as live data or rendered in the product**.
 
-Read-only API adds `/api/orderbooks?slug=<market-slug>` and `/api/observations?slug=<market-slug>&limit=25`. The dashboard shows archived BBO and distinctly flags missing / stale data. **No claim of guaranteed, continuous, gap-free feed or executable quote.** Network access to Gamma may be unavailable on the local machine; if so the collector reports the failure and does not create synthetic data.
+## Development guidance
 
-See [stream collector architecture and limitations](docs/STREAM_COLLECTOR.md).
-
-## Phase 2A: Paper Trading with virtual dollars
-
-The localhost dashboard now has a **Paper Trading** panel for both manual BUY UP / BUY DOWN and SELL ALL. Starting virtual balance is $1,000 per isolated account (`demo` vs `clob`), with a per-buy limit of $50, total open cost cap $250, simulated 0.5% fees, persistent position and cash ledger, and request idempotency. **No exchange orders are ever submitted.**
-
-The offline demo uses explicitly **synthetic**, constant bid/ask 48¢/52¢ even if Gamma/CLOB is down. This supports testing UI/accounting only, not a predictive signal. CLOB Paper demands a fresh, verified real full-book event and will reject otherwise. There is **no automatic settlement, confirmed winning outcome, unrealized P&L, or verified exchange fees** yet. See [Paper Trading documentation](docs/PAPER_TRADING.md).
-
-## Phase 1 scope
-
-- UTC-aligned 300-second slots and strict UP/DOWN token mapping.
-- Public Gamma API adapter that **only** makes bounded, timed GET requests with capped transient-error retry.
-- PostgreSQL snapshot upserts and a read-only localhost API.
-- Optional Redis cache; synthetic fixture snapshots can never be pushed to Redis.
-- Fail-closed RiskGate that unconditionally rejects LIVE mode.
-- No automatic database deletion or credential logging.
-
-See `docs/ARCHITECTURE.md`, `docs/TASKS.md`, `docs/SECURITY.md`.
+Codex and Claude Code skills are installed in `.agents/skills` and
+`.claude/skills`, including `ios-inspired-ui-design`. Project-specific safety
+rules in `AGENTS.md` take precedence. Upstream kit:
+[0xmarkhydra/master-skill](https://github.com/0xmarkhydra/master-skill).

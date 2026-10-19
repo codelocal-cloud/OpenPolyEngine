@@ -1,9 +1,4 @@
-"""One-shot read-only BTC 5-minute scanner; PostgreSQL is the only database.
-
-Examples:
-    python3 -m services.market_data.cli --slots 3 --json
-    python3 -m services.market_data.cli --slots 3 --persist --cache
-"""
+"""Public read-only BTC 5m Gamma discovery. No synthetic/fixture input path."""
 from __future__ import annotations
 
 import argparse
@@ -17,7 +12,7 @@ import redis
 
 from .cache import RedisCache
 from .gamma import GammaClient, GammaError
-from .models import MarketParseError, parse_event, upcoming_slugs
+from .models import MarketParseError, upcoming_slugs
 from .storage import PostgresStore, append_jsonl
 
 
@@ -32,69 +27,56 @@ def _datetime(value: str) -> datetime:
 
 
 def make_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(description="Read-only Polymarket BTC 5m market discovery")
-    p.add_argument("--slots", type=int, default=3, help="Current plus future slots (1..12)")
+    p = argparse.ArgumentParser(description="Official Gamma API BTC 5m discovery (real-data-only)")
+    p.add_argument("--slots", type=int, default=1, help="Current plus future slots (1..12)")
     p.add_argument("--at", type=_datetime, help="Reference timestamp (ISO8601 with UTC offset)")
-    p.add_argument("--offline-fixture", type=Path, help="Fixture event JSON; only with --slots 1")
-    p.add_argument("--json", action="store_true", help="Print JSON instead of concise human output")
-    p.add_argument("--jsonl", type=Path, help="Optional research export in newline JSON format")
-    p.add_argument("--persist", action="store_true", help="Write observations to PostgreSQL/TimescaleDB")
-    p.add_argument("--cache", action="store_true", help="Publish real observations to Redis with 30s TTL")
+    p.add_argument("--json", action="store_true")
+    p.add_argument("--jsonl", type=Path, help="Optional export of real market snapshots")
+    p.add_argument("--persist", action="store_true", help="Write verified metadata to TimescaleDB")
+    p.add_argument("--cache", action="store_true", help="Publish verified snapshots to Redis")
     return p
 
 
 def main(argv: list[str] | None = None) -> int:
-    p = make_parser()
-    args = p.parse_args(argv)
+    parser = make_parser()
+    args = parser.parse_args(argv)
     if not 1 <= args.slots <= 12:
-        p.error("--slots must be between 1 and 12")
-    if args.offline_fixture and args.slots != 1:
-        p.error("Offline fixture requires --slots 1")
-    if args.offline_fixture and args.cache:
-        p.error("Cannot publish offline fixture to real-time Redis cache")
-
+        parser.error("--slots must be between 1 and 12")
     at = args.at or datetime.now(timezone.utc)
-    client = GammaClient() if not args.offline_fixture else None
+    client = GammaClient()
     results = []
-    saved = []
+    verified = []
     had_error = False
     for slug in upcoming_slugs(at, args.slots):
         try:
-            if args.offline_fixture:
-                event = json.loads(args.offline_fixture.read_text(encoding="utf-8"))
-                snapshot = parse_event(event, slug, fetched_at=at, data_source="offline_fixture")
-            else:
-                snapshot = client.fetch_snapshot(slug)  # type: ignore[union-attr]
+            snapshot = client.fetch_snapshot(slug)
             if snapshot is None:
                 results.append({"slug": slug, "status": "not_found"})
                 continue
-            saved.append(snapshot)
+            if snapshot.data_source != "gamma_public":
+                raise MarketParseError("Unverified upstream data")
+            verified.append(snapshot)
             results.append({"slug": slug, "status": "ok", "market": snapshot.to_dict()})
         except (OSError, GammaError, MarketParseError, ValueError) as exc:
             had_error = True
             results.append({"slug": slug, "status": "error", "detail": str(exc)})
-
     try:
         if args.jsonl:
-            append_jsonl(args.jsonl, saved)
+            append_jsonl(args.jsonl, verified)
         if args.persist:
-            PostgresStore().write_snapshots(saved)
+            PostgresStore().write_snapshots(verified)
         if args.cache:
-            RedisCache().publish(saved)
+            RedisCache().publish(verified)
     except (OSError, ValueError, psycopg.Error, redis.RedisError) as exc:
         print(f"Unable to persist or cache market data: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 2
-
     if args.json:
-        print(json.dumps({"mode": "READ_ONLY", "results": results}, indent=2))
+        print(json.dumps({"mode":"READ_ONLY","source":"gamma_public","results":results}, indent=2))
     else:
-        print("PolyBTC BTC 5M | READ_ONLY | No wallet / No live orders")
+        print("OpenPolyEngine | Real Gamma only | No live order execution")
         for item in results:
             if item["status"] == "ok":
-                m = item["market"]
-                print(f'{item["slug"]}: UP={m["price_up"]} DOWN={m["price_down"]} '
-                      f'active={m["active"]} accepting={m["accepting_orders"]} '
-                      f'(indicative only)')
+                print(f'{item["slug"]}: metadata verified; indicative prices only')
             else:
                 print(f'{item["slug"]}: {item["status"]} {item.get("detail", "")}')
     return 1 if had_error else 0

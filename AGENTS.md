@@ -6,7 +6,8 @@
 - Write timestamped, provenance-tagged market observations. Never treat indicative Gamma prices as executable quotes.
 - Never store private keys, seed phrases, credentials or wallet permissions in repository files or logs.
 - Live trading MUST remain physically unavailable in Phase 1; only a separately reviewed and authorized feature can introduce it.
-- Paper orders must stay PostgreSQL-only, atomic and idempotent. The synthetic demo account is explicitly not Polymarket data; only fresh, verified CLOB full-book snapshots can justify CLOB paper fills.
+- Production is REAL DATA ONLY: no demo accounts, fixture ingestion, sample prices, synthetic market quotes, or fallback fake values exposed by API or dashboard. Historical legacy demo rows may remain for audit but cannot be traded. Only verified Gamma token mapping + feeSchedule and fresh public CLOB full-book snapshots can justify simulated paper fills.
+- Paper orders must stay PostgreSQL-only, atomic and idempotent. Never substitute static fee assumptions for official per-market metadata; missing fees, stale quotes or book gaps must fail closed.
 - Default to failing closed on stale market data, incompatible schemas, unknown market outcomes or provider errors.
 - Keep unit tests independent of Docker while integration tests can use the Docker-managed instances.
 - Avoid destructive Docker volume operations. Never erase or overwrite trading research data implicitly.

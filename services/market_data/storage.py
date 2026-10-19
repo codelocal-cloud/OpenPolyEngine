@@ -51,6 +51,7 @@ SELECT payload_json FROM (
   SELECT DISTINCT ON (slug)
     slug, slot_start, fetched_at, payload_json
   FROM market_snapshots
+  WHERE data_source = 'gamma_public'
   ORDER BY slug, fetched_at DESC
 ) AS latest
 ORDER BY slot_start DESC
@@ -68,6 +69,8 @@ class PostgresStore:
     def write_snapshots(self, snapshots: list[MarketSnapshot]) -> int:
         if not snapshots:
             return 0
+        if any(item.data_source != "gamma_public" for item in snapshots):
+            raise ValueError("Only verified Gamma data can be persisted")
         with self._connector(**self.config.connect_kwargs()) as con:
             with con.cursor() as cur:
                 for snap in snapshots:

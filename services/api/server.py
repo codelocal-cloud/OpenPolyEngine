@@ -52,7 +52,7 @@ class MarketHandler(BaseHTTPRequestHandler):
             return
         if uri.path in ("/api/paper/state", "/api/paper/quote", "/api/paper/request"):
             params = parse_qs(uri.query)
-            account = params.get("account", ["demo"])[0]
+            account = params.get("account", ["clob"])[0]
             try:
                 paper = self.paper_engine or PaperEngine()
                 if uri.path == "/api/paper/state":
@@ -187,7 +187,7 @@ class MarketHandler(BaseHTTPRequestHandler):
         except (ValueError, json.JSONDecodeError):
             self._send(400, {"error": "invalid_paper_request"})
             return
-        account = parse_qs(uri.query).get("account", ["demo"])[0]
+        account = parse_qs(uri.query).get("account", ["clob"])[0]
         try:
             result = (self.paper_engine or PaperEngine()).execute(account, payload)
         except PaperTradeRejected as exc:

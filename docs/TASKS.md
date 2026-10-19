@@ -21,7 +21,7 @@
 - [x] Versioned schema for timestamped market observations; initial ingestion code (not verified lossless)
 - [ ] Audit and prove lossless ingestion / historical completeness under sustained real traffic
 - [ ] Backtesting with no future leakage and realistic fills/fees
-- [x] Local PostgreSQL-only Paper Trading with separate synthetic demo and guarded CLOB paper accounts; manual BUY, SELL ALL, position ledger and per-order/exposure caps
+- [x] Paper Trading now operates on verified CLOB quotes only; legacy demo records retained solely for audit, demo API disabled, synthetic CLI ingestion removed
 - [x] Reject unreconciled CLOB order-book deltas and clock ties; recover ambiguous paper POSTs using idempotent request lookup
 - [ ] Verified market resolution, automated settlement and long-run quantitative risk controls
 - [x] React read-only dashboard, historical snapshots and stale order-book indicator

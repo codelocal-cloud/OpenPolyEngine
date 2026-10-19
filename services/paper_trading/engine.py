@@ -1,17 +1,16 @@
 """PostgreSQL-only local paper trades: durable, atomic, idempotent, cash backed.
 
-Explicitly labelled synthetic DEMO mode works offline; CLOB mode requires
-current/verified, fresh public CLOB order-book depth. Neither submits orders
+Only verified Polymarket CLOB order-book snapshots can justify paper fills.
+No synthetic demo prices. This module never submits orders
 or uses wallet, CLOB trading REST endpoints, or private keys.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from hashlib import sha256
 import json
-import re
 from datetime import datetime, timezone
-from decimal import Decimal, InvalidOperation, ROUND_DOWN
+from decimal import Decimal, InvalidOperation, ROUND_DOWN, ROUND_HALF_UP
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -23,13 +22,12 @@ from services.market_data.models import slot_slug
 ZERO = Decimal("0")
 ONE = Decimal("1")
 P = Decimal("0.000001")
-FEE_RATE = Decimal("0.005")  # 0.5% *illustrative*, NOT a verified exchange fee.
+FEE_PRECISION = Decimal("0.00001")  # Polymarket official fee precision
 MAX_TRADE = Decimal("50")
 MIN_TRADE = Decimal("1")
 MAX_EXPOSURE = Decimal("250")
 MAX_OPEN_POSITIONS = 6
 MAX_QUOTE_AGE_SECONDS = 10
-DEMO_LIQUIDITY = Decimal("1000")  # synthetic shares, enough to close max $250 exposure.
 
 
 class PaperTradeRejected(ValueError):
@@ -47,6 +45,7 @@ class Quote:
     ask_size: Decimal
     source: str
     received_at: datetime | None
+    fee_rate: Decimal
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -55,7 +54,9 @@ class Quote:
             "best_ask": str(self.ask), "bid_size": str(self.bid_size),
             "ask_size": str(self.ask_size), "source": self.source,
             "received_at": self.received_at.isoformat() if self.received_at else None,
-            "fee_rate_assumed": str(FEE_RATE),
+            "fee_rate": str(self.fee_rate),
+            "fee_provenance": "gamma_feeSchedule",
+            "fee_model": "C * rate * price * (1 - price)",
             "mode": "PAPER_ONLY",
         }
 
@@ -90,25 +91,13 @@ def parse_request_id(raw: Any) -> UUID:
         raise PaperTradeRejected("request_id must be a UUID v4") from exc
 
 
-def demo_quote(now: datetime, outcome: str) -> Quote:
-    if outcome not in ("UP", "DOWN"):
-        raise PaperTradeRejected("Invalid outcome")
-    slug = "paper-demo-btc-5m-" + slot_slug(now).rsplit("-", 1)[1]
-    return Quote(
-        slug=slug, outcome=outcome, token=f"DEMO-{outcome}",
-        bid=Decimal("0.48"), ask=Decimal("0.52"),
-        bid_size=DEMO_LIQUIDITY, ask_size=DEMO_LIQUIDITY,
-        source="synthetic_demo", received_at=None,
-    )
-
-
 def verified_clob_quote(con: psycopg.Connection, now: datetime, outcome: str) -> Quote:
     """Read current contract + genuine raw book with an age/depth guard."""
     slug = slot_slug(now)
     with con.cursor() as cur:
         cur.execute(
             """SELECT token_up, token_down, slot_start, slot_end,
-                      active, closed, accepting_orders, fetched_at
+                      active, closed, accepting_orders, fetched_at, payload_json
                FROM market_snapshots
                WHERE slug = %s AND data_source = 'gamma_public'
                ORDER BY fetched_at DESC LIMIT 1""",
@@ -117,11 +106,19 @@ def verified_clob_quote(con: psycopg.Connection, now: datetime, outcome: str) ->
         market = cur.fetchone()
         if not market:
             raise PaperTradeRejected("Current Gamma verified market unavailable")
-        up, down, start, end, active, closed, orders, fetched = market
+        up, down, start, end, active, closed, orders, fetched, metadata = market
         if not (start <= now < end and active and not closed and orders):
             raise PaperTradeRejected("Market is not accepting simulated trades")
         if not (0 <= (now - fetched).total_seconds() <= 45):
             raise PaperTradeRejected("Gamma market metadata stale")
+        if not isinstance(metadata, dict) or metadata.get("fee_rate") is None or metadata.get("fee_exponent") != 1:
+            raise PaperTradeRejected("Missing verified Gamma fee schedule; paper trading disabled")
+        try:
+            fee_rate = Decimal(str(metadata["fee_rate"]))
+        except (InvalidOperation, ValueError, TypeError) as exc:
+            raise PaperTradeRejected("Invalid verified Gamma fee rate") from exc
+        if not fee_rate.is_finite() or not ZERO <= fee_rate <= Decimal("0.5"):
+            raise PaperTradeRejected("Verified Gamma fee rate outside bounds")
         token = up if outcome == "UP" else down
         if not isinstance(token, str) or not token.isdigit():
             raise PaperTradeRejected("No verified token for outcome")
@@ -173,7 +170,7 @@ def verified_clob_quote(con: psycopg.Connection, now: datetime, outcome: str) ->
         raise PaperTradeRejected("Nonfinite quote")
     if not (ZERO < bid < ask < ONE and bid_size > ZERO and ask_size > ZERO):
         raise PaperTradeRejected("Crossed/missing book depth")
-    return Quote(slug, outcome, token, bid, ask, bid_size, ask_size, "polymarket_clob_ws", received_at)
+    return Quote(slug, outcome, token, bid, ask, bid_size, ask_size, "polymarket_clob_ws", received_at, fee_rate)
 
 
 class PaperEngine:
@@ -186,15 +183,15 @@ class PaperEngine:
         return self.connector(**self.config.connect_kwargs())
 
     def quote(self, account: str, outcome: str) -> dict:
-        if account not in ("demo", "clob") or outcome not in ("UP", "DOWN"):
+        if account != "clob" or outcome not in ("UP", "DOWN"):
             raise PaperTradeRejected("Invalid account or outcome")
         with self._connect() as con:
             now = self.clock()
-            quote = demo_quote(now, outcome) if account == "demo" else verified_clob_quote(con, now, outcome)
+            quote = verified_clob_quote(con, now, outcome)
         return quote.to_dict()
 
     def state(self, account: str) -> dict:
-        if account not in ("demo", "clob"):
+        if account != "clob":
             raise PaperTradeRejected("Invalid paper account")
         with self._connect() as con:
             with con.cursor() as cur:
@@ -217,7 +214,7 @@ class PaperEngine:
             "mode": "PAPER_ONLY", "account": account, "currency": "VIRTUAL_USD",
             "cash_balance": str(balance[0]), "starting_cash": str(balance[1]),
             "realized_pnl": str(balance[2]), "max_trade_usd": str(MAX_TRADE),
-            "max_exposure_usd": str(MAX_EXPOSURE), "fee_rate_assumed": str(FEE_RATE),
+            "max_exposure_usd": str(MAX_EXPOSURE), "fee_model": "gamma_feeSchedule",
             "valuation_status": "UNAVAILABLE_NO_SETTLEMENT_OR_MARK_PRICE",
             "positions": [
                 {"slug": row[0], "outcome": row[1], "token_id": row[2],
@@ -238,7 +235,7 @@ class PaperEngine:
 
     def request_status(self, account: str, raw_request_id: str) -> dict:
         """Retrieve a previously committed paper order after an ambiguous POST."""
-        if account not in ("demo", "clob"):
+        if account != "clob":
             raise PaperTradeRejected("Invalid paper account")
         request_id = parse_request_id(raw_request_id)
         with self._connect() as con:
@@ -265,7 +262,7 @@ class PaperEngine:
         }
 
     def execute(self, account: str, req: dict) -> dict:
-        if account not in ("demo", "clob") or not isinstance(req, dict):
+        if account != "clob" or not isinstance(req, dict):
             raise PaperTradeRejected("Invalid paper account/request")
         if set(req) - {"request_id", "side", "outcome", "spend_usd", "slug"}:
             raise PaperTradeRejected("Unsupported request fields")
@@ -314,14 +311,7 @@ class PaperEngine:
                             "quantity": str(previous[5]), "cash_delta": str(previous[6]),
                             "source": previous[7]}
                 now = self.clock()
-                quote = demo_quote(now, outcome) if account == "demo" else verified_clob_quote(con, now, outcome)
-                # In the explicitly synthetic sandbox, closing historical
-                # virtual positions at fixed demo prices is allowed. This is
-                # not a claim of an executable or settled prediction market.
-                if side == "SELL" and account == "demo" and isinstance(slug, str):
-                    if not re.fullmatch(r"paper-demo-btc-5m-[0-9]{10,}", slug):
-                        raise PaperTradeRejected("Invalid sandbox market slug")
-                    quote = replace(quote, slug=slug)
+                quote = verified_clob_quote(con, now, outcome)
                 if slug is not None and slug != quote.slug:
                     raise PaperTradeRejected("Selected market is not the current executable paper slot")
                 cur.execute(
@@ -342,12 +332,15 @@ class PaperEngine:
                         raise PaperTradeRejected("Open paper exposure would exceed $250")
                     if not position and position_count >= MAX_OPEN_POSITIONS:
                         raise PaperTradeRejected("Too many open paper positions")
-                    quantity = money(spend / (quote.ask * (ONE + FEE_RATE)))
+                    fee_per_share = quote.fee_rate * quote.ask * (ONE - quote.ask)
+                    quantity = money(spend / (quote.ask + fee_per_share))
                     if quantity <= ZERO or quantity > quote.ask_size:
                         raise PaperTradeRejected("Not enough top-of-book liquidity for full paper fill")
                     price = quote.ask
                     notional = money(quantity * price)
-                    fee = money(notional * FEE_RATE)
+                    fee = (quantity * quote.fee_rate * price * (ONE - price)).quantize(
+                        FEE_PRECISION, rounding=ROUND_HALF_UP
+                    )
                     cost = notional + fee
                     if cost > cash:
                         raise PaperTradeRejected("Not enough virtual cash including fee")
@@ -374,7 +367,9 @@ class PaperEngine:
                         raise PaperTradeRejected("Not enough top-of-book liquidity to close position")
                     price = quote.bid
                     notional = money(quantity * price)
-                    fee = money(notional * FEE_RATE)
+                    fee = (quantity * quote.fee_rate * price * (ONE - price)).quantize(
+                        FEE_PRECISION, rounding=ROUND_HALF_UP
+                    )
                     delta = notional - fee
                     new_pnl = delta - cost_basis
                     cur.execute(

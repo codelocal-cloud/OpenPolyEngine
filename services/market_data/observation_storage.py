@@ -31,7 +31,7 @@ RECENT_OBSERVATIONS_SQL = """
 SELECT slug, outcome, instrument, event_type, observed_at,
        received_at, payload
 FROM market_observations
-WHERE slug = %s
+WHERE slug = %s AND source = 'polymarket_clob_ws'
 ORDER BY observed_at DESC, received_at DESC
 LIMIT %s
 """

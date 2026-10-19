@@ -41,6 +41,7 @@ class QuoteFreshnessTest(unittest.TestCase):
             token_up=token_up, token_down=token_down, price_up=Decimal("0.52"),
             price_down=Decimal("0.48"), active=True, closed=False,
             accepting_orders=True, resolution_source=None,
+            fee_rate=Decimal("0.07"), fee_exponent=1,
         )
         try:
             PostgresStore(cfg, connector=lambda **kw: SharedTransaction()).write_snapshots([snapshot])
